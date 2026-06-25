@@ -124,7 +124,7 @@ export async function createEzTreeFromResume(data) {
   const tree = new Tree(options);
   tree.generate();
   tree.name = "ResumeGeneratedTree";
-  tree.scale.setScalar(0.36);
+  tree.scale.setScalar(0.62);
   tree.position.y = -1.02;
   tree.userData.adapter = {
     source: "ez-tree",

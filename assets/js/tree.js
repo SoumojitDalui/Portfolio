@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-import { focusTargets, resumeTreeData } from "./data.js?v=ez-adapter-render";
-import { buildPortfolioLayout, seededRange } from "./layout.js?v=ez-adapter-render";
-import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=ez-adapter-render";
-import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=ez-adapter-render";
-import { createMaterials } from "./materials.js?v=ez-adapter-render";
+import { focusTargets, resumeTreeData } from "./data.js?v=ez-decorated";
+import { buildPortfolioLayout, seededRange } from "./layout.js?v=ez-decorated";
+import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=ez-decorated";
+import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=ez-decorated";
+import { createMaterials } from "./materials.js?v=ez-decorated";
 
 // Renderer and camera setup
 const canvas = document.querySelector("#tree-scene");
@@ -213,7 +213,10 @@ function addTrunk() {
 
   addNaturalBarkLines();
   addExperienceRings();
+  addProfileLabels();
+}
 
+function addProfileLabels() {
   createTextLabel("Soumojit Dalui", new THREE.Vector3(0, 0.82, 0.58), {
     scale: 0.29,
     fontSize: 38,
@@ -225,6 +228,69 @@ function addTrunk() {
     fontSize: 30,
     maxWidth: 300,
     background: "rgba(255, 248, 216, 0.78)"
+  });
+}
+
+function addEzPortfolioDecorations() {
+  addNaturalBarkLines();
+  addExperienceRings();
+  addProfileLabels();
+  addEzDomainLabels();
+  addEzProjectFruits();
+}
+
+function addEzDomainLabels() {
+  portfolioLayout.branchLayouts.forEach((branch) => {
+    const position = branch.endpoint.clone();
+    position.multiplyScalar(0.86);
+    position.y = Math.min(position.y + 0.18, 3.2);
+
+    createTextLabel(branch.label, position, {
+      scale: 0.15 + branch.weight * 0.026,
+      fontSize: 26,
+      maxWidth: 320,
+      background: branch.experienceType === "production" ? "rgba(255, 220, 147, 0.58)" : "rgba(255, 248, 216, 0.54)"
+    });
+  });
+
+  portfolioLayout.skillLayouts.forEach((cluster) => {
+    const position = cluster.center.clone();
+    position.multiplyScalar(0.82);
+    position.y = Math.min(position.y + 0.32, 3.42);
+
+    createTextLabel(cluster.label, position, {
+      scale: 0.12,
+      fontSize: 24,
+      maxWidth: 260,
+      background: "rgba(236, 255, 204, 0.48)"
+    });
+  });
+}
+
+function addEzProjectFruits() {
+  portfolioLayout.fruits.forEach((fruit, index) => {
+    const materialByType = {
+      production: materials.fruitProduction,
+      openSource: materials.fruitOpenSource,
+      academic: materials.fruitAcademic,
+      prototype: materials.fruitPrototype,
+      personal: materials.fruitPersonal,
+      internship: materials.fruitAlt
+    };
+
+    const position = fruit.position.clone();
+    position.multiplyScalar(0.82);
+    position.y = Math.min(Math.max(position.y + 0.08, 2.1), 3.05);
+    fruit.position.copy(position);
+    fruit.radius *= 0.92;
+
+    addFruitModel(fruit, materialByType[fruit.experienceType] || (index % 3 === 0 ? materials.fruitAlt : materials.fruit));
+    createTextLabel(fruit.label, fruit.position.clone().add(new THREE.Vector3(0, -fruit.radius - 0.12, 0.16)), {
+      scale: 0.1 + fruit.weight * 0.018,
+      fontSize: 22,
+      maxWidth: 320,
+      background: fruit.experienceType === "openSource" ? "rgba(215, 247, 255, 0.5)" : "rgba(255, 248, 216, 0.48)"
+    });
   });
 }
 
@@ -688,6 +754,7 @@ addCloud(new THREE.Vector3(0.7, 6.4, -4.2), 0.58);
 addRoots();
 if (useEzTreeSkeleton) {
   await addEzTreeSkeleton();
+  addEzPortfolioDecorations();
 } else {
   addTrunk();
   addBranches();
