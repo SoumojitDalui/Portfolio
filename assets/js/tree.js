@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-import { focusTargets, resumeTreeData } from "./data.js?v=ez-grass-field";
-import { buildPortfolioLayout, seededRange } from "./layout.js?v=ez-grass-field";
-import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=ez-grass-field";
-import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=ez-grass-field";
-import { createMaterials } from "./materials.js?v=ez-grass-field";
+import { focusTargets, resumeTreeData } from "./data.js?v=ez-library-env4";
+import { buildPortfolioLayout, seededRange } from "./layout.js?v=ez-library-env4";
+import { addEzEnvironment } from "./ezEnvironment.js?v=ez-library-env4";
+import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=ez-library-env4";
+import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=ez-library-env4";
+import { createMaterials } from "./materials.js?v=ez-library-env4";
 
 // Renderer and camera setup
 const canvas = document.querySelector("#tree-scene");
@@ -69,38 +70,20 @@ function addLights() {
   scene.add(sunGlow);
 }
 
-function addGround() {
-  const groundGeometry = new THREE.CylinderGeometry(4.9, 4.94, 0.02, 96);
-  groundGeometry.setAttribute("uv2", groundGeometry.attributes.uv);
-  const ground = new THREE.Mesh(groundGeometry, materials.ground);
-  ground.position.y = -1.03;
-  root.add(ground);
-
-  const soil = new THREE.Mesh(new THREE.CylinderGeometry(4.94, 4.98, 0.04, 96, 1, true), materials.soil);
-  soil.position.y = -1.06;
-  root.add(soil);
-
-  const grassRing = new THREE.Mesh(
-    new THREE.TorusGeometry(4.72, 0.055, 8, 128),
-    materials.groundRing
-  );
-  grassRing.position.y = -1.005;
-  grassRing.rotation.x = Math.PI / 2;
-  root.add(grassRing);
-
-  addDirtPatches();
-  addGrassField();
-  addFlowers();
+async function addGround() {
+  await addEzEnvironment(scene, root, resumeTreeData.seed);
 }
 
 function addDirtPatches() {
   const patchGeometry = new THREE.CircleGeometry(1, 48);
   const patches = [
-    { position: [0, -0.995, 2.6], scale: [1.2, 0.44, 1], rotation: 0.05 },
-    { position: [-0.38, -0.994, 1.44], scale: [0.86, 0.28, 1], rotation: -0.18 },
-    { position: [0.62, -0.993, 0.36], scale: [0.7, 0.24, 1], rotation: 0.22 },
-    { position: [-2.1, -0.994, -1.72], scale: [0.72, 0.32, 1], rotation: 0.55 },
-    { position: [2.25, -0.994, -1.94], scale: [0.8, 0.34, 1], rotation: -0.32 }
+    { position: [0, -1.018, 3.0], scale: [1.9, 0.5, 1], rotation: 0.04 },
+    { position: [-0.22, -1.017, 1.72], scale: [1.2, 0.34, 1], rotation: -0.18 },
+    { position: [0.46, -1.016, 0.42], scale: [0.82, 0.26, 1], rotation: 0.22 },
+    { position: [-2.2, -1.017, -1.72], scale: [0.95, 0.38, 1], rotation: 0.55 },
+    { position: [2.25, -1.017, -1.94], scale: [1.02, 0.38, 1], rotation: -0.32 },
+    { position: [-4.9, -1.018, 3.8], scale: [2.4, 0.62, 1], rotation: -0.42 },
+    { position: [5.4, -1.018, 3.15], scale: [2.2, 0.52, 1], rotation: 0.28 }
   ];
 
   patches.forEach((patch) => {
@@ -117,12 +100,12 @@ function addFlowers() {
   const stemGeometry = new THREE.CylinderGeometry(0.006, 0.009, 0.13, 5);
   const bloomGeometry = new THREE.IcosahedronGeometry(0.032, 1);
 
-  for (let i = 0; i < 26; i += 1) {
+  for (let i = 0; i < 72; i += 1) {
     const angle = i * 2.399963 + seededRange(resumeTreeData.seed, `flower-angle:${i}`, -0.18, 0.18);
-    const radius = 1.25 + seededRange(resumeTreeData.seed, `flower-radius:${i}`, 0, 3.15);
+    const radius = 1.45 + seededRange(resumeTreeData.seed, `flower-radius:${i}`, 0, 9.4);
 
     const stem = new THREE.Mesh(stemGeometry, materials.grassDark);
-    stem.position.set(Math.cos(angle) * radius, -0.94, Math.sin(angle) * radius);
+    stem.position.set(Math.cos(angle) * radius, -0.955, Math.sin(angle) * radius);
     stem.rotation.z = seededRange(resumeTreeData.seed, `flower-lean:${i}`, -0.22, 0.22);
     root.add(stem);
 
@@ -158,39 +141,39 @@ function addCloud(position, scale = 1) {
 
 function addGrassField() {
   const bladeShape = new THREE.Shape();
-  bladeShape.moveTo(-0.018, 0);
-  bladeShape.quadraticCurveTo(-0.008, 0.22, 0.002, 0.42);
-  bladeShape.quadraticCurveTo(0.022, 0.22, 0.018, 0);
+  bladeShape.moveTo(-0.006, 0);
+  bladeShape.quadraticCurveTo(-0.004, 0.22, 0.001, 0.48);
+  bladeShape.quadraticCurveTo(0.009, 0.22, 0.006, 0);
   bladeShape.closePath();
 
   const bladeGeometry = new THREE.ShapeGeometry(bladeShape);
   bladeGeometry.translate(0, 0.005, 0);
-  const bladeCount = 1850;
+  const bladeCount = 15000;
   const grass = new THREE.InstancedMesh(bladeGeometry, materials.grass, bladeCount);
   const darkGrass = new THREE.InstancedMesh(bladeGeometry, materials.grassDark, Math.floor(bladeCount * 0.38));
   const dummy = new THREE.Object3D();
-  const color = new THREE.Color();
   let grassIndex = 0;
   let darkIndex = 0;
 
-  for (let clump = 0; clump < 190; clump += 1) {
+  for (let clump = 0; clump < 980; clump += 1) {
     const clumpAngle = clump * 2.399963 + seededRange(resumeTreeData.seed, `grass-clump-angle:${clump}`, -0.3, 0.3);
-    const clumpRadius = 0.78 + seededRange(resumeTreeData.seed, `grass-clump-radius:${clump}`, 0, 3.9);
+    const clumpRadius = 0.82 + seededRange(resumeTreeData.seed, `grass-clump-radius:${clump}`, 0, 15.6);
     const clumpCenter = new THREE.Vector3(Math.cos(clumpAngle) * clumpRadius, -1.0, Math.sin(clumpAngle) * clumpRadius);
-    const bladesInClump = Math.round(seededRange(resumeTreeData.seed, `grass-clump-count:${clump}`, 6, 14));
+    const bladesInClump = Math.round(seededRange(resumeTreeData.seed, `grass-clump-count:${clump}`, 12, 24));
 
     for (let blade = 0; blade < bladesInClump; blade += 1) {
       const spreadAngle = seededRange(resumeTreeData.seed, `grass-spread-angle:${clump}:${blade}`, 0, Math.PI * 2);
-      const spreadRadius = seededRange(resumeTreeData.seed, `grass-spread-radius:${clump}:${blade}`, 0, 0.18);
+      const spreadRadius = seededRange(resumeTreeData.seed, `grass-spread-radius:${clump}:${blade}`, 0, 0.34);
       const x = clumpCenter.x + Math.cos(spreadAngle) * spreadRadius;
       const z = clumpCenter.z + Math.sin(spreadAngle) * spreadRadius;
       const distanceFromCenter = Math.hypot(x, z);
 
-      if (distanceFromCenter > 4.58) continue;
+      if (distanceFromCenter > 16.2) continue;
 
       const nearPath = Math.abs(x * 0.22 + z - 2.15) < 0.28 && z > 0.35;
-      const height = seededRange(resumeTreeData.seed, `grass-height:${clump}:${blade}`, nearPath ? 0.14 : 0.24, nearPath ? 0.26 : 0.54);
-      const width = seededRange(resumeTreeData.seed, `grass-width:${clump}:${blade}`, 0.72, 1.55);
+      const farFade = THREE.MathUtils.clamp(distanceFromCenter / 16.2, 0, 1);
+      const height = seededRange(resumeTreeData.seed, `grass-height:${clump}:${blade}`, nearPath ? 0.1 : 0.22, nearPath ? 0.23 : 0.68) * (1 - farFade * 0.24);
+      const width = seededRange(resumeTreeData.seed, `grass-width:${clump}:${blade}`, 0.42, 0.95);
       const lean = seededRange(resumeTreeData.seed, `grass-lean:${clump}:${blade}`, -0.34, 0.34);
       const tint = seededRange(resumeTreeData.seed, `grass-tint:${clump}:${blade}`, 0, 1);
       const target = tint < 0.36 ? darkGrass : grass;
@@ -207,12 +190,6 @@ function addGrassField() {
       dummy.scale.set(width, height, 1);
       dummy.updateMatrix();
       target.setMatrixAt(targetIndex, dummy.matrix);
-      color.setHSL(
-        seededRange(resumeTreeData.seed, `grass-hue:${clump}:${blade}`, 0.22, 0.31),
-        seededRange(resumeTreeData.seed, `grass-saturation:${clump}:${blade}`, 0.48, 0.74),
-        seededRange(resumeTreeData.seed, `grass-light:${clump}:${blade}`, tint < 0.36 ? 0.24 : 0.42, tint < 0.36 ? 0.38 : 0.56)
-      );
-      target.setColorAt(targetIndex, color);
 
       if (tint < 0.36) {
         darkIndex += 1;
@@ -226,8 +203,6 @@ function addGrassField() {
   darkGrass.count = darkIndex;
   grass.instanceMatrix.needsUpdate = true;
   darkGrass.instanceMatrix.needsUpdate = true;
-  if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
-  if (darkGrass.instanceColor) darkGrass.instanceColor.needsUpdate = true;
 
   root.add(grass);
   root.add(darkGrass);
@@ -818,7 +793,7 @@ window.__portfolioTreeDebug = {
 
 // Scene bootstrap
 addLights();
-addGround();
+await addGround();
 addCloud(new THREE.Vector3(-3.8, 5.8, -3.4), 0.95);
 addCloud(new THREE.Vector3(3.6, 5.2, -2.8), 0.72);
 addCloud(new THREE.Vector3(0.7, 6.4, -4.2), 0.58);

@@ -94,10 +94,10 @@ export function createMaterials() {
     barkColor: loadEzTreeTexture(EZ_TREE_TEXTURES.barkColor, { repeatX: 1.4, repeatY: 3.4 }),
     barkNormal: loadEzTreeTexture(EZ_TREE_TEXTURES.barkNormal, { color: false, repeatX: 1.4, repeatY: 3.4 }),
     barkRoughness: loadEzTreeTexture(EZ_TREE_TEXTURES.barkRoughness, { color: false, repeatX: 1.4, repeatY: 3.4 }),
-    dirtColor: loadEzTreeTexture(EZ_TREE_TEXTURES.dirtColor, { repeat: 2.8 }),
-    dirtNormal: loadEzTreeTexture(EZ_TREE_TEXTURES.dirtNormal, { color: false, repeat: 2.8 }),
-    grass: loadEzTreeTexture(EZ_TREE_TEXTURES.grass, { repeat: 4.2 }),
-    grassDense: loadEzTreeTexture(EZ_TREE_TEXTURES.grass, { repeat: 8 }),
+    dirtColor: loadEzTreeTexture(EZ_TREE_TEXTURES.dirtColor, { repeat: 18 }),
+    dirtNormal: loadEzTreeTexture(EZ_TREE_TEXTURES.dirtNormal, { color: false, repeat: 18 }),
+    grass: loadEzTreeTexture(EZ_TREE_TEXTURES.grass, { repeat: 28 }),
+    grassDense: loadEzTreeTexture(EZ_TREE_TEXTURES.grass, { repeat: 12 }),
     leafOak: loadEzTreeTexture(EZ_TREE_TEXTURES.leafOak, { repeat: 1 })
   };
   const paintTextures = {
@@ -143,23 +143,13 @@ export function createMaterials() {
     marker: barkMaterial(0xd19a61),
     ground: naturalMaterial({ color: 0xe3efbb, map: ezTextures.grass, roughness: 0.92 }),
     groundRing: naturalMaterial({ color: 0x86b957, map: ezTextures.grass, roughness: 0.9 }),
-    grass: naturalMaterial({
-      color: 0xffffff,
-      map: ezTextures.grassDense,
-      side: THREE.DoubleSide,
-      roughness: 0.96,
-      vertexColors: true,
-      emissive: 0x204816,
-      emissiveIntensity: 0.04
+    grass: new THREE.MeshBasicMaterial({
+      color: 0x7fc94d,
+      side: THREE.DoubleSide
     }),
-    grassDark: naturalMaterial({
-      color: 0xffffff,
-      map: ezTextures.grassDense,
-      side: THREE.DoubleSide,
-      roughness: 0.96,
-      vertexColors: true,
-      emissive: 0x102c0a,
-      emissiveIntensity: 0.03
+    grassDark: new THREE.MeshBasicMaterial({
+      color: 0x4f8c35,
+      side: THREE.DoubleSide
     }),
     soil: naturalMaterial({ color: 0xffffff, map: ezTextures.dirtColor, normalMap: ezTextures.dirtNormal, normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.94 }),
     cloud: paintedMaterial({ color: 0xfff6df }),
