@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-import { focusTargets, resumeTreeData } from "./data.js?v=ez-assets";
-import { buildPortfolioLayout, seededRange } from "./layout.js?v=ez-assets";
-import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=ez-assets";
-import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=ez-assets";
-import { createMaterials } from "./materials.js?v=ez-assets";
+import { focusTargets, resumeTreeData } from "./data.js?v=ez-grass-field";
+import { buildPortfolioLayout, seededRange } from "./layout.js?v=ez-grass-field";
+import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=ez-grass-field";
+import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=ez-grass-field";
+import { createMaterials } from "./materials.js?v=ez-grass-field";
 
 // Renderer and camera setup
 const canvas = document.querySelector("#tree-scene");
@@ -88,27 +88,48 @@ function addGround() {
   grassRing.rotation.x = Math.PI / 2;
   root.add(grassRing);
 
-  addGrassBlades();
+  addDirtPatches();
+  addGrassField();
   addFlowers();
 }
 
-function addFlowers() {
-  const stemGeometry = new THREE.CylinderGeometry(0.01, 0.014, 0.18, 5);
-  const bloomGeometry = new THREE.IcosahedronGeometry(0.045, 1);
+function addDirtPatches() {
+  const patchGeometry = new THREE.CircleGeometry(1, 48);
+  const patches = [
+    { position: [0, -0.995, 2.6], scale: [1.2, 0.44, 1], rotation: 0.05 },
+    { position: [-0.38, -0.994, 1.44], scale: [0.86, 0.28, 1], rotation: -0.18 },
+    { position: [0.62, -0.993, 0.36], scale: [0.7, 0.24, 1], rotation: 0.22 },
+    { position: [-2.1, -0.994, -1.72], scale: [0.72, 0.32, 1], rotation: 0.55 },
+    { position: [2.25, -0.994, -1.94], scale: [0.8, 0.34, 1], rotation: -0.32 }
+  ];
 
-  for (let i = 0; i < 34; i += 1) {
-    const angle = i * 2.399963 + 0.35;
-    const radius = 1.15 + (((i * 43) % 100) / 100) * 3.1;
+  patches.forEach((patch) => {
+    const mesh = new THREE.Mesh(patchGeometry, materials.soil);
+    mesh.position.set(...patch.position);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.z = patch.rotation;
+    mesh.scale.set(...patch.scale);
+    root.add(mesh);
+  });
+}
+
+function addFlowers() {
+  const stemGeometry = new THREE.CylinderGeometry(0.006, 0.009, 0.13, 5);
+  const bloomGeometry = new THREE.IcosahedronGeometry(0.032, 1);
+
+  for (let i = 0; i < 26; i += 1) {
+    const angle = i * 2.399963 + seededRange(resumeTreeData.seed, `flower-angle:${i}`, -0.18, 0.18);
+    const radius = 1.25 + seededRange(resumeTreeData.seed, `flower-radius:${i}`, 0, 3.15);
 
     const stem = new THREE.Mesh(stemGeometry, materials.grassDark);
-    stem.position.set(Math.cos(angle) * radius, -0.93, Math.sin(angle) * radius);
-    stem.rotation.z = (((i * 11) % 100) / 100 - 0.5) * 0.24;
+    stem.position.set(Math.cos(angle) * radius, -0.94, Math.sin(angle) * radius);
+    stem.rotation.z = seededRange(resumeTreeData.seed, `flower-lean:${i}`, -0.22, 0.22);
     root.add(stem);
 
-    const bloom = new THREE.Mesh(bloomGeometry, i % 3 === 0 ? materials.fruitAlt : materials.flower);
+    const bloom = new THREE.Mesh(bloomGeometry, i % 5 === 0 ? materials.flowerYellow : materials.flower);
     bloom.position.copy(stem.position);
-    bloom.position.y += 0.12;
-    bloom.scale.setScalar(0.8 + (((i * 23) % 100) / 100) * 0.6);
+    bloom.position.y += 0.09;
+    bloom.scale.setScalar(seededRange(resumeTreeData.seed, `flower-scale:${i}`, 0.72, 1.3));
     root.add(bloom);
   }
 }
@@ -135,31 +156,81 @@ function addCloud(position, scale = 1) {
   scene.add(cloud);
 }
 
-function addGrassBlades() {
+function addGrassField() {
   const bladeShape = new THREE.Shape();
   bladeShape.moveTo(-0.018, 0);
-  bladeShape.lineTo(0.018, 0);
-  bladeShape.lineTo(0.006, 0.22);
-  bladeShape.lineTo(0, 0.3);
-  bladeShape.lineTo(-0.008, 0.2);
+  bladeShape.quadraticCurveTo(-0.008, 0.22, 0.002, 0.42);
+  bladeShape.quadraticCurveTo(0.022, 0.22, 0.018, 0);
   bladeShape.closePath();
 
   const bladeGeometry = new THREE.ShapeGeometry(bladeShape);
+  bladeGeometry.translate(0, 0.005, 0);
+  const bladeCount = 1850;
+  const grass = new THREE.InstancedMesh(bladeGeometry, materials.grass, bladeCount);
+  const darkGrass = new THREE.InstancedMesh(bladeGeometry, materials.grassDark, Math.floor(bladeCount * 0.38));
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+  let grassIndex = 0;
+  let darkIndex = 0;
 
-  for (let i = 0; i < 220; i += 1) {
-    const angle = i * 2.399963;
-    const ringNoise = ((i * 47) % 100) / 100;
-    const radius = 0.9 + ringNoise * 3.72;
-    const blade = new THREE.Mesh(bladeGeometry, i % 4 === 0 ? materials.grassDark : materials.grass);
-    blade.position.set(Math.cos(angle) * radius, -1.01, Math.sin(angle) * radius);
-    blade.rotation.set(
-      0.18 + (((i * 29) % 100) / 100) * 0.32,
-      -angle + Math.PI / 2,
-      (((i * 17) % 100) / 100 - 0.5) * 0.45
-    );
-    blade.scale.setScalar(0.72 + (((i * 31) % 100) / 100) * 0.55);
-    root.add(blade);
+  for (let clump = 0; clump < 190; clump += 1) {
+    const clumpAngle = clump * 2.399963 + seededRange(resumeTreeData.seed, `grass-clump-angle:${clump}`, -0.3, 0.3);
+    const clumpRadius = 0.78 + seededRange(resumeTreeData.seed, `grass-clump-radius:${clump}`, 0, 3.9);
+    const clumpCenter = new THREE.Vector3(Math.cos(clumpAngle) * clumpRadius, -1.0, Math.sin(clumpAngle) * clumpRadius);
+    const bladesInClump = Math.round(seededRange(resumeTreeData.seed, `grass-clump-count:${clump}`, 6, 14));
+
+    for (let blade = 0; blade < bladesInClump; blade += 1) {
+      const spreadAngle = seededRange(resumeTreeData.seed, `grass-spread-angle:${clump}:${blade}`, 0, Math.PI * 2);
+      const spreadRadius = seededRange(resumeTreeData.seed, `grass-spread-radius:${clump}:${blade}`, 0, 0.18);
+      const x = clumpCenter.x + Math.cos(spreadAngle) * spreadRadius;
+      const z = clumpCenter.z + Math.sin(spreadAngle) * spreadRadius;
+      const distanceFromCenter = Math.hypot(x, z);
+
+      if (distanceFromCenter > 4.58) continue;
+
+      const nearPath = Math.abs(x * 0.22 + z - 2.15) < 0.28 && z > 0.35;
+      const height = seededRange(resumeTreeData.seed, `grass-height:${clump}:${blade}`, nearPath ? 0.14 : 0.24, nearPath ? 0.26 : 0.54);
+      const width = seededRange(resumeTreeData.seed, `grass-width:${clump}:${blade}`, 0.72, 1.55);
+      const lean = seededRange(resumeTreeData.seed, `grass-lean:${clump}:${blade}`, -0.34, 0.34);
+      const tint = seededRange(resumeTreeData.seed, `grass-tint:${clump}:${blade}`, 0, 1);
+      const target = tint < 0.36 ? darkGrass : grass;
+      const targetIndex = tint < 0.36 ? darkIndex : grassIndex;
+
+      if (targetIndex >= target.count) continue;
+
+      dummy.position.set(x, -1.0, z);
+      dummy.rotation.set(
+        seededRange(resumeTreeData.seed, `grass-tilt-x:${clump}:${blade}`, -0.2, 0.2),
+        seededRange(resumeTreeData.seed, `grass-yaw:${clump}:${blade}`, 0, Math.PI * 2),
+        lean
+      );
+      dummy.scale.set(width, height, 1);
+      dummy.updateMatrix();
+      target.setMatrixAt(targetIndex, dummy.matrix);
+      color.setHSL(
+        seededRange(resumeTreeData.seed, `grass-hue:${clump}:${blade}`, 0.22, 0.31),
+        seededRange(resumeTreeData.seed, `grass-saturation:${clump}:${blade}`, 0.48, 0.74),
+        seededRange(resumeTreeData.seed, `grass-light:${clump}:${blade}`, tint < 0.36 ? 0.24 : 0.42, tint < 0.36 ? 0.38 : 0.56)
+      );
+      target.setColorAt(targetIndex, color);
+
+      if (tint < 0.36) {
+        darkIndex += 1;
+      } else {
+        grassIndex += 1;
+      }
+    }
   }
+
+  grass.count = grassIndex;
+  darkGrass.count = darkIndex;
+  grass.instanceMatrix.needsUpdate = true;
+  darkGrass.instanceMatrix.needsUpdate = true;
+  if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
+  if (darkGrass.instanceColor) darkGrass.instanceColor.needsUpdate = true;
+
+  root.add(grass);
+  root.add(darkGrass);
 }
 
 function tubeFromPoints(points, radius, material, segments = 36) {

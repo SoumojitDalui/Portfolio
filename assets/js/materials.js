@@ -141,12 +141,29 @@ export function createMaterials() {
     fruitPrototype: paintedMaterial({ color: 0xd864ad, emissive: 0x7d245f, emissiveIntensity: 0.08 }),
     fruitPersonal: paintedMaterial({ color: 0xe5ad48, emissive: 0x7c4c13, emissiveIntensity: 0.08 }),
     marker: barkMaterial(0xd19a61),
-    ground: naturalMaterial({ color: 0xffffff, map: ezTextures.grass, roughness: 0.92 }),
+    ground: naturalMaterial({ color: 0xe3efbb, map: ezTextures.grass, roughness: 0.92 }),
     groundRing: naturalMaterial({ color: 0x86b957, map: ezTextures.grass, roughness: 0.9 }),
-    grass: naturalMaterial({ color: 0xc2ee82, map: ezTextures.grassDense, side: THREE.DoubleSide, roughness: 0.96 }),
-    grassDark: naturalMaterial({ color: 0x78bd5a, map: ezTextures.grassDense, side: THREE.DoubleSide, roughness: 0.96 }),
+    grass: naturalMaterial({
+      color: 0xffffff,
+      map: ezTextures.grassDense,
+      side: THREE.DoubleSide,
+      roughness: 0.96,
+      vertexColors: true,
+      emissive: 0x204816,
+      emissiveIntensity: 0.04
+    }),
+    grassDark: naturalMaterial({
+      color: 0xffffff,
+      map: ezTextures.grassDense,
+      side: THREE.DoubleSide,
+      roughness: 0.96,
+      vertexColors: true,
+      emissive: 0x102c0a,
+      emissiveIntensity: 0.03
+    }),
     soil: naturalMaterial({ color: 0xffffff, map: ezTextures.dirtColor, normalMap: ezTextures.dirtNormal, normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.94 }),
     cloud: paintedMaterial({ color: 0xfff6df }),
-    flower: paintedMaterial({ color: 0xffc1d6, map: paintTextures.flower, emissive: 0xff95bc, emissiveIntensity: 0.14 })
+    flower: paintedMaterial({ color: 0xffc1d6, map: paintTextures.flower, emissive: 0xff95bc, emissiveIntensity: 0.14 }),
+    flowerYellow: paintedMaterial({ color: 0xffdb62, emissive: 0xe9a300, emissiveIntensity: 0.14 })
   };
 }
