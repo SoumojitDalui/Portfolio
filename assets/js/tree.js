@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-import { focusTargets, resumeTreeData } from "./data.js?v=ez-texture";
-import { buildPortfolioLayout, seededRange } from "./layout.js?v=ez-texture";
-import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=ez-texture";
-import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=ez-texture";
-import { createMaterials } from "./materials.js?v=ez-texture";
+import { focusTargets, resumeTreeData } from "./data.js?v=ez-assets";
+import { buildPortfolioLayout, seededRange } from "./layout.js?v=ez-assets";
+import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=ez-assets";
+import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=ez-assets";
+import { createMaterials } from "./materials.js?v=ez-assets";
 
 // Renderer and camera setup
 const canvas = document.querySelector("#tree-scene");

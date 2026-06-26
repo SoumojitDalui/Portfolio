@@ -1,5 +1,16 @@
 import * as THREE from "three";
 
+const EZ_TREE_ASSET_BASE = "https://media.githubusercontent.com/media/dgreenheck/ez-tree/main/src/app/public/textures";
+const EZ_TREE_TEXTURES = {
+  barkColor: `${EZ_TREE_ASSET_BASE}/bark/Bark002_1K-JPG/Bark002_1K-JPG_Color.jpg`,
+  barkNormal: `${EZ_TREE_ASSET_BASE}/bark/Bark002_1K-JPG/Bark002_1K-JPG_NormalGL.jpg`,
+  barkRoughness: `${EZ_TREE_ASSET_BASE}/bark/Bark002_1K-JPG/Bark002_1K-JPG_Roughness.jpg`,
+  dirtColor: `${EZ_TREE_ASSET_BASE}/ground/dirt_color.jpg`,
+  dirtNormal: `${EZ_TREE_ASSET_BASE}/ground/dirt_normal.jpg`,
+  grass: `${EZ_TREE_ASSET_BASE}/ground/grass.jpg`,
+  leafOak: `${EZ_TREE_ASSET_BASE}/leaves/oak.png`
+};
+
 function createToonGradient() {
   const canvas = document.createElement("canvas");
   canvas.width = 4;
@@ -15,6 +26,19 @@ function createToonGradient() {
   texture.minFilter = THREE.NearestFilter;
   texture.magFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
+  return texture;
+}
+
+function loadEzTreeTexture(url, options = {}) {
+  const loader = new THREE.TextureLoader();
+  loader.setCrossOrigin("anonymous");
+  const texture = loader.load(url);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(options.repeatX || options.repeat || 1, options.repeatY || options.repeat || 1);
+  if (options.color !== false) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
   return texture;
 }
 
@@ -66,28 +90,49 @@ function createPaintTexture(colors, options = {}) {
 
 export function createMaterials() {
   const toonGradient = createToonGradient();
+  const ezTextures = {
+    barkColor: loadEzTreeTexture(EZ_TREE_TEXTURES.barkColor, { repeatX: 1.4, repeatY: 3.4 }),
+    barkNormal: loadEzTreeTexture(EZ_TREE_TEXTURES.barkNormal, { color: false, repeatX: 1.4, repeatY: 3.4 }),
+    barkRoughness: loadEzTreeTexture(EZ_TREE_TEXTURES.barkRoughness, { color: false, repeatX: 1.4, repeatY: 3.4 }),
+    dirtColor: loadEzTreeTexture(EZ_TREE_TEXTURES.dirtColor, { repeat: 2.8 }),
+    dirtNormal: loadEzTreeTexture(EZ_TREE_TEXTURES.dirtNormal, { color: false, repeat: 2.8 }),
+    grass: loadEzTreeTexture(EZ_TREE_TEXTURES.grass, { repeat: 4.2 }),
+    grassDense: loadEzTreeTexture(EZ_TREE_TEXTURES.grass, { repeat: 8 }),
+    leafOak: loadEzTreeTexture(EZ_TREE_TEXTURES.leafOak, { repeat: 1 })
+  };
   const paintTextures = {
-    bark: createPaintTexture(["#8f643f", "#b98250", "#6f472d", "#d1a06a"], { repeat: 1.2, strokes: 130 }),
-    leaves: createPaintTexture(["#81c96e", "#aee27f", "#5ea961", "#d7ef9a"], { repeat: 2.4, strokes: 180 }),
-    grass: createPaintTexture(["#91d66d", "#c6ec84", "#6fbd60", "#eff6a8"], { repeat: 4.5, strokes: 210 }),
-    soil: createPaintTexture(["#856142", "#aa7b50", "#6e4d34", "#d6aa73"], { repeat: 2.2, strokes: 130 })
+    fruit: createPaintTexture(["#f5b247", "#ffd782", "#df8732", "#fff0a8"], { repeat: 1.6, strokes: 130 }),
+    flower: createPaintTexture(["#ffc1d6", "#fff0f5", "#ff95bc", "#ffd8e8"], { repeat: 1.4, strokes: 90 })
   };
 
   const paintedMaterial = (options) => new THREE.MeshToonMaterial({
     gradientMap: toonGradient,
     ...options
   });
+  const naturalMaterial = (options) => new THREE.MeshStandardMaterial({
+    roughness: 0.86,
+    metalness: 0,
+    ...options
+  });
+  const barkMaterial = (color, options = {}) => naturalMaterial({
+    color,
+    map: ezTextures.barkColor,
+    normalMap: ezTextures.barkNormal,
+    roughnessMap: ezTextures.barkRoughness,
+    normalScale: new THREE.Vector2(0.45, 0.45),
+    ...options
+  });
 
   return {
-    bark: paintedMaterial({ color: 0xa36a43, map: paintTextures.bark }),
-    barkDark: paintedMaterial({ color: 0x765034, map: paintTextures.bark }),
-    barkGroove: paintedMaterial({ color: 0x5d3924, map: paintTextures.bark }),
-    barkHighlight: paintedMaterial({ color: 0xd19a61, map: paintTextures.bark }),
-    leaf: paintedMaterial({ color: 0x9bdc75, map: paintTextures.leaves }),
-    leafDark: paintedMaterial({ color: 0x6fbd64, map: paintTextures.leaves }),
-    canopy: paintedMaterial({ color: 0x98d86b, map: paintTextures.leaves }),
-    canopyLight: paintedMaterial({ color: 0xb7e77d, map: paintTextures.leaves }),
-    root: paintedMaterial({ color: 0xc98d55, map: paintTextures.bark }),
+    bark: barkMaterial(0xffffff),
+    barkDark: barkMaterial(0x7f6248),
+    barkGroove: barkMaterial(0x6b4c36),
+    barkHighlight: barkMaterial(0xd3a979),
+    leaf: naturalMaterial({ color: 0xb8e879, map: ezTextures.leafOak, transparent: true, alphaTest: 0.45, side: THREE.DoubleSide }),
+    leafDark: naturalMaterial({ color: 0x86c96b, map: ezTextures.leafOak, transparent: true, alphaTest: 0.45, side: THREE.DoubleSide }),
+    canopy: naturalMaterial({ color: 0xa8db72, map: ezTextures.leafOak }),
+    canopyLight: naturalMaterial({ color: 0xc2ee82, map: ezTextures.leafOak }),
+    root: barkMaterial(0xc98d55),
     fruit: paintedMaterial({ color: 0xf0a93a, emissive: 0x9b4b12, emissiveIntensity: 0.1 }),
     fruitAlt: paintedMaterial({ color: 0xe86988, emissive: 0x8d2441, emissiveIntensity: 0.08 }),
     fruitProduction: paintedMaterial({ color: 0xf2a236, emissive: 0x9f5013, emissiveIntensity: 0.1 }),
@@ -95,13 +140,13 @@ export function createMaterials() {
     fruitAcademic: paintedMaterial({ color: 0x8f78de, emissive: 0x382a85, emissiveIntensity: 0.08 }),
     fruitPrototype: paintedMaterial({ color: 0xd864ad, emissive: 0x7d245f, emissiveIntensity: 0.08 }),
     fruitPersonal: paintedMaterial({ color: 0xe5ad48, emissive: 0x7c4c13, emissiveIntensity: 0.08 }),
-    marker: paintedMaterial({ color: 0xd19a61, map: paintTextures.bark }),
-    ground: paintedMaterial({ color: 0xa8dc71, map: paintTextures.grass }),
-    groundRing: paintedMaterial({ color: 0x6aa84a, map: paintTextures.grass }),
-    grass: paintedMaterial({ color: 0xb3e86e, map: paintTextures.grass, side: THREE.DoubleSide }),
-    grassDark: paintedMaterial({ color: 0x74bf5c, map: paintTextures.grass, side: THREE.DoubleSide }),
-    soil: paintedMaterial({ color: 0x9c704a, map: paintTextures.soil }),
+    marker: barkMaterial(0xd19a61),
+    ground: naturalMaterial({ color: 0xffffff, map: ezTextures.grass, roughness: 0.92 }),
+    groundRing: naturalMaterial({ color: 0x86b957, map: ezTextures.grass, roughness: 0.9 }),
+    grass: naturalMaterial({ color: 0xc2ee82, map: ezTextures.grassDense, side: THREE.DoubleSide, roughness: 0.96 }),
+    grassDark: naturalMaterial({ color: 0x78bd5a, map: ezTextures.grassDense, side: THREE.DoubleSide, roughness: 0.96 }),
+    soil: naturalMaterial({ color: 0xffffff, map: ezTextures.dirtColor, normalMap: ezTextures.dirtNormal, normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.94 }),
     cloud: paintedMaterial({ color: 0xfff6df }),
-    flower: paintedMaterial({ color: 0xffc1d6, emissive: 0xff95bc, emissiveIntensity: 0.14 })
+    flower: paintedMaterial({ color: 0xffc1d6, map: paintTextures.flower, emissive: 0xff95bc, emissiveIntensity: 0.14 })
   };
 }
