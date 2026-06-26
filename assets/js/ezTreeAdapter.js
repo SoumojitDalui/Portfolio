@@ -32,10 +32,10 @@ export function resumeToEzTreeOptions(data) {
     type: "deciduous",
     bark: {
       type: "oak",
-      tint: 0xc98755,
-      flatShading: true,
-      textured: false,
-      textureScale: { x: 0.7, y: 4 }
+      tint: 0xffffff,
+      flatShading: false,
+      textured: true,
+      textureScale: { x: 1.1, y: 4.8 }
     },
     branch: {
       levels: 3,
