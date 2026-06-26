@@ -1,12 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-import { focusTargets, resumeTreeData } from "./data.js?v=ez-library-env4";
-import { buildPortfolioLayout, seededRange } from "./layout.js?v=ez-library-env4";
-import { addEzEnvironment } from "./ezEnvironment.js?v=ez-library-env4";
-import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=ez-library-env4";
-import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=ez-library-env4";
-import { createMaterials } from "./materials.js?v=ez-library-env4";
+import { focusTargets, resumeTreeData } from "./data.js?v=glsl-grass2";
+import { buildPortfolioLayout, seededRange } from "./layout.js?v=glsl-grass2";
+import { addEzEnvironment } from "./ezEnvironment.js?v=glsl-grass2";
+import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=glsl-grass2";
+import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=glsl-grass2";
+import { createMaterials } from "./materials.js?v=glsl-grass2";
 
 // Renderer and camera setup
 const canvas = document.querySelector("#tree-scene");
@@ -44,6 +44,7 @@ let desiredCamera = camera.position.clone();
 let desiredTarget = controls.target.clone();
 let frameCount = 0;
 let isCameraAnimating = false;
+let environmentController = null;
 
 const materials = createMaterials();
 
@@ -71,7 +72,7 @@ function addLights() {
 }
 
 async function addGround() {
-  await addEzEnvironment(scene, root, resumeTreeData.seed);
+  environmentController = await addEzEnvironment(scene, root, resumeTreeData.seed);
 }
 
 function addDirtPatches() {
@@ -760,6 +761,9 @@ function animate(time = 0) {
   frameCount += 1;
 
   const seconds = time * 0.001;
+  if (environmentController) {
+    environmentController.update(seconds);
+  }
   if (isCameraAnimating) {
     camera.position.lerp(desiredCamera, 0.045);
     controls.target.lerp(desiredTarget, 0.05);

@@ -11,7 +11,6 @@ const TEXTURES = {
 };
 
 const MODELS = {
-  grass: `${EZ_TREE_RAW_BASE}/models/grass.glb`,
   whiteFlower: `${EZ_TREE_RAW_BASE}/models/flower_white.glb`,
   blueFlower: `${EZ_TREE_RAW_BASE}/models/flower_blue.glb`,
   yellowFlower: `${EZ_TREE_RAW_BASE}/models/flower_yellow.glb`
@@ -126,51 +125,136 @@ async function loadModel(url) {
   return mesh;
 }
 
-function addInstancedGrass(root, mesh, seed) {
-  const random = randomFactory(`${seed}:ez-real-grass`);
-  const sourceMaterial = mesh.material || new THREE.MeshBasicMaterial({ color: 0x74b84a });
-  const material = new THREE.MeshPhongMaterial({
-    map: sourceMaterial.map || null,
-    color: 0x78a94a,
-    emissive: new THREE.Color(0x306f25),
-    emissiveIntensity: 0.05,
-    alphaTest: 0.5,
-    side: THREE.DoubleSide
-  });
+function createTriangleGrass(seed, grassTexture) {
+  const random = randomFactory(`${seed}:triangle-glsl-grass`);
+  const bladeCount = 52000;
+  const patchRadius = 21;
+  const positions = [];
+  const colors = [];
+  const uvs = [];
+  const yaws = [];
+  const origins = [];
+  const heights = [];
+  const shades = [];
+  const yaw = new THREE.Vector3();
 
-  const maxInstances = 9200;
-  const grass = new THREE.InstancedMesh(mesh.geometry, material, maxInstances);
-  const dummy = new THREE.Object3D();
-  const color = new THREE.Color();
-  let count = 0;
-
-  for (let i = 0; i < maxInstances; i += 1) {
-    const radius = random(0.8, 18);
+  for (let i = 0; i < bladeCount; i += 1) {
+    const radius = patchRadius * Math.sqrt(random());
     const angle = random(0, Math.PI * 2);
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
-    const path = Math.abs(x * 0.18 + z - 2.2) < 0.35 && z > 0.2;
-    if (path && random() > 0.35) continue;
+    const path = Math.abs(x * 0.18 + z - 2.2) < 0.38 && z > 0.2;
+    if (path && random() > 0.28) continue;
 
-    dummy.position.set(x, -1.0, z);
-    dummy.rotation.set(0, random(0, Math.PI * 2), 0);
-    const nearScale = THREE.MathUtils.clamp(1 - radius / 22, 0.45, 1);
-    dummy.scale.set(
-      random(0.0007, 0.0018) * nearScale,
-      random(path ? 0.0012 : 0.0022, path ? 0.003 : 0.007) * nearScale,
-      random(0.0007, 0.0018) * nearScale
-    );
-    dummy.updateMatrix();
-    grass.setMatrixAt(count, dummy.matrix);
-    color.setHSL(random(0.22, 0.32), random(0.5, 0.75), random(0.33, 0.52));
-    grass.setColorAt(count, color);
-    count += 1;
+    const bladeYaw = random(0, Math.PI * 2);
+    yaw.set(Math.sin(bladeYaw), 0, -Math.cos(bladeYaw));
+    const nearScale = THREE.MathUtils.clamp(1 - radius / (patchRadius * 1.12), 0.54, 1);
+    const height = random(path ? 0.08 : 0.16, path ? 0.18 : 0.42) * nearScale;
+    const shade = random(0, 1);
+    const uv = [
+      THREE.MathUtils.mapLinear(x, -patchRadius, patchRadius, 0, 1),
+      THREE.MathUtils.mapLinear(z, -patchRadius, patchRadius, 0, 1)
+    ];
+
+    [
+      { role: [0.1, 0, 0], bladeUv: [0, 0] },
+      { role: [0, 0, 0.1], bladeUv: [1, 0] },
+      { role: [1, 1, 1], bladeUv: [0.5, 1] }
+    ].forEach((vertex) => {
+      positions.push(x, -0.99, z);
+      colors.push(...vertex.role);
+      uvs.push(uv[0] + vertex.bladeUv[0] * 0.004, uv[1] + vertex.bladeUv[1] * 0.004);
+      yaws.push(yaw.x, yaw.y, yaw.z);
+      origins.push(x, -0.99, z);
+      heights.push(height);
+      shades.push(shade);
+    });
   }
 
-  grass.count = count;
-  grass.instanceMatrix.needsUpdate = true;
-  if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
-  root.add(grass);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute("aYaw", new THREE.Float32BufferAttribute(yaws, 3));
+  geometry.setAttribute("aBladeOrigin", new THREE.Float32BufferAttribute(origins, 3));
+  geometry.setAttribute("aBladeHeight", new THREE.Float32BufferAttribute(heights, 1));
+  geometry.setAttribute("aGrassShade", new THREE.Float32BufferAttribute(shades, 1));
+  geometry.computeBoundingSphere();
+
+  const material = new THREE.ShaderMaterial({
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    transparent: false,
+    uniforms: {
+      uTime: { value: 0 },
+      uDiffuseMap: { value: grassTexture },
+      uBladeWidth: { value: 0.034 },
+      uWindDirection: { value: Math.PI * 0.25 },
+      uWindSpeed: { value: 1.15 },
+      uWindNoiseScale: { value: 1.75 }
+    },
+    vertexShader: `
+      attribute vec3 aYaw;
+      attribute vec3 aBladeOrigin;
+      attribute float aBladeHeight;
+      attribute float aGrassShade;
+      uniform float uTime;
+      uniform float uBladeWidth;
+      uniform float uWindDirection;
+      uniform float uWindSpeed;
+      uniform float uWindNoiseScale;
+      varying vec2 vUv;
+      varying float vTip;
+      varying float vShade;
+
+      void main() {
+        vec3 transformed = aBladeOrigin;
+        float side = color.r > 0.05 ? 1.0 : (color.b > 0.05 ? -1.0 : 0.0);
+        float tip = step(0.9, color.g);
+        float height = aBladeHeight * (0.82 + aGrassShade * 0.34);
+        float width = uBladeWidth * (0.72 + aGrassShade * 0.58);
+
+        transformed += aYaw * side * width * 0.5;
+        transformed.y += tip * height;
+
+        float windA = sin(uTime * uWindSpeed + dot(aBladeOrigin.xz, vec2(0.61, 0.37)) * uWindNoiseScale);
+        float windB = cos(uTime * uWindSpeed * 1.43 + dot(aBladeOrigin.xz, vec2(-0.29, 0.71)) * uWindNoiseScale);
+        vec3 windDirection = vec3(cos(uWindDirection), 0.0, sin(uWindDirection));
+        transformed += windDirection * tip * (windA * 0.5 + windB * 0.5) * height * 0.18;
+
+        vUv = uv;
+        vTip = tip;
+        vShade = aGrassShade;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uDiffuseMap;
+      varying vec2 vUv;
+      varying float vTip;
+      varying float vShade;
+
+      void main() {
+        vec3 sampled = texture2D(uDiffuseMap, vUv * 18.0).rgb;
+        vec3 shadowGreen = vec3(0.18, 0.34, 0.10);
+        vec3 midGreen = vec3(0.35, 0.58, 0.18);
+        vec3 tipGreen = vec3(0.72, 0.86, 0.42);
+        vec3 bladeColor = mix(shadowGreen, midGreen, vShade);
+        bladeColor = mix(bladeColor, tipGreen, vTip * 0.42);
+        bladeColor *= mix(vec3(0.82), sampled * 1.22, 0.36);
+        gl_FragColor = vec4(bladeColor, 1.0);
+      }
+    `
+  });
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  return {
+    mesh,
+    update(time) {
+      material.uniforms.uTime.value = time;
+    }
+  };
 }
 
 function addFlowers(root, flowerMeshes, seed) {
@@ -183,7 +267,7 @@ function addFlowers(root, flowerMeshes, seed) {
     const angle = random(0, Math.PI * 2);
     flower.position.set(Math.cos(angle) * radius, -0.99, Math.sin(angle) * radius);
     flower.rotation.y = random(0, Math.PI * 2);
-    const scale = random(0.012, 0.026);
+    const scale = random(0.0025, 0.0055);
     flower.scale.setScalar(scale);
     root.add(flower);
   }
@@ -212,13 +296,14 @@ export async function addEzEnvironment(scene, root, seed) {
   ground.position.y = -1.035;
   scene.add(ground);
 
-  const [grassMesh, whiteFlower, blueFlower, yellowFlower] = await Promise.all([
-    loadModel(MODELS.grass),
+  const [whiteFlower, blueFlower, yellowFlower] = await Promise.all([
     loadModel(MODELS.whiteFlower).catch(() => null),
     loadModel(MODELS.blueFlower).catch(() => null),
     loadModel(MODELS.yellowFlower).catch(() => null)
   ]);
 
-  addInstancedGrass(root, grassMesh, seed);
+  const grass = createTriangleGrass(seed, grassTexture);
+  root.add(grass.mesh);
   addFlowers(root, [whiteFlower, blueFlower, yellowFlower].filter(Boolean), seed);
+  return grass;
 }
