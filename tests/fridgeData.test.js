@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { fridgePortfolio } from "../assets/js/fridgeData.js";
 
@@ -15,4 +17,11 @@ test("project containers have unique labels and repository links", () => {
   const projects = fridgePortfolio.shelves.flatMap((shelf) => shelf.projects);
   assert.equal(new Set(projects.map((project) => project.label)).size, projects.length);
   assert.ok(projects.every((project) => project.url.startsWith("https://github.com/")));
+  assert.equal(new Set(projects.map((project) => project.foodModel)).size, projects.length);
+  assert.ok(projects.every((project) => /^[a-z0-9-]+$/.test(project.foodModel)));
+  assert.ok(
+    projects.every((project) =>
+      existsSync(fileURLToPath(new URL(`../assets/models/food/${project.foodModel}.glb`, import.meta.url)))
+    )
+  );
 });

@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-import { fridgePortfolio } from "./fridgeData.js?v=fridge-1";
+import { fridgePortfolio } from "./fridgeData.js?v=fridge-2";
+import { groundingOffset, normalizedModelScale } from "./foodPlacement.js?v=fridge-2";
 import { createMiniGameController, loadScores } from "./miniGames.js?v=fridge-1";
 
 const canvas = document.querySelector("#fridge-scene");
@@ -53,6 +55,8 @@ const interactive = [];
 const clock = new THREE.Clock();
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2(2, 2);
+const foodLoader = new GLTFLoader();
+const foodModelCache = new Map();
 const fridge = new THREE.Group();
 scene.add(fridge);
 
@@ -274,50 +278,87 @@ function addDrawers() {
   });
 }
 
-function addProjectContainer(project, shelf, index, y) {
+function loadFoodModel(modelName) {
+  if (!foodModelCache.has(modelName)) {
+    foodModelCache.set(modelName, foodLoader.loadAsync(`assets/models/food/${modelName}.glb`));
+  }
+  return foodModelCache.get(modelName);
+}
+
+async function populateFoodModel(group, project, shelfTop, index, loadingPlate) {
+  try {
+    const gltf = await loadFoodModel(project.foodModel);
+    const model = gltf.scene.clone(true);
+    model.rotation.y = [-0.28, 0.12, 0.34][index] || 0;
+    model.updateMatrixWorld(true);
+
+    const bounds = new THREE.Box3().setFromObject(model);
+    const size = bounds.getSize(new THREE.Vector3());
+    model.scale.setScalar(normalizedModelScale(size));
+    model.updateMatrixWorld(true);
+
+    bounds.setFromObject(model);
+    const center = bounds.getCenter(new THREE.Vector3());
+    model.position.x -= center.x;
+    model.position.z -= center.z;
+    model.position.y += groundingOffset(shelfTop, bounds.min.y);
+
+    model.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    group.remove(loadingPlate);
+    group.add(model);
+  } catch (error) {
+    loadingPlate.material.color.set(0xc77958);
+    console.warn(`Unable to load food model: ${project.foodModel}`, error);
+  }
+}
+
+function addProjectContainer(project, shelf, index, shelfTop) {
   const group = new THREE.Group();
   const x = (index - 1) * 0.7;
-  group.position.set(x, y + 0.2, 0.3 - Math.abs(index - 1) * 0.08);
+  group.position.set(x, 0, 0.28 - Math.abs(index - 1) * 0.05);
   fridge.add(group);
 
-  let body;
-  if (shelf.cuisine === "Indian tiffin") {
-    body = addMesh(new THREE.CylinderGeometry(0.26, 0.26, 0.32, 20), materials.metal, new THREE.Vector3(), group);
-  } else if (shelf.cuisine === "Chinese takeout") {
-    body = addMesh(new THREE.BoxGeometry(0.5, 0.42, 0.42), materials.white, new THREE.Vector3(), group);
-    body.scale.set(0.82, 1, 0.82);
-  } else if (shelf.cuisine === "Italian meal prep") {
-    body = addMesh(new THREE.BoxGeometry(0.56, 0.24, 0.46), new THREE.MeshStandardMaterial({ color: shelf.color, roughness: 0.72 }), new THREE.Vector3(), group);
-    addMesh(new THREE.BoxGeometry(0.5, 0.035, 0.4), materials.glass, new THREE.Vector3(0, 0.14, 0), group);
-  } else {
-    body = addMesh(new THREE.BoxGeometry(0.56, 0.22, 0.5), new THREE.MeshStandardMaterial({ color: 0x364348, roughness: 0.7 }), new THREE.Vector3(), group);
-    for (let segment = -1; segment <= 1; segment += 1) {
-      addMesh(new THREE.BoxGeometry(0.12, 0.05, 0.28), new THREE.MeshStandardMaterial({ color: segment === 0 ? 0xd3b45f : 0x70a06d, roughness: 0.8 }), new THREE.Vector3(segment * 0.16, 0.14, 0), group);
-    }
-  }
-
-  makeInteractive(body, { type: "project", project, shelf }, `Inspect ${project.label}`);
+  const loadingPlate = addMesh(
+    new THREE.CylinderGeometry(0.2, 0.22, 0.035, 20),
+    materials.white.clone(),
+    new THREE.Vector3(0, shelfTop + 0.03, 0),
+    group
+  );
+  const hitTarget = addMesh(
+    new THREE.BoxGeometry(0.6, 0.48, 0.58),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    new THREE.Vector3(0, shelfTop + 0.25, 0),
+    group
+  );
+  hitTarget.castShadow = false;
+  hitTarget.receiveShadow = false;
+  makeInteractive(hitTarget, { type: "project", project, shelf }, `Inspect ${project.label}`);
   createLabelPlane(
     { width: 420, height: 160, background: "#f6efdb", title: project.label, lines: [shelf.cuisine], align: "center" },
     new THREE.Vector2(0.52, 0.2),
-    new THREE.Vector3(0, -0.03, 0.25),
+    new THREE.Vector3(0, shelfTop - 0.08, 0.54),
     group,
     { type: "project", project, shelf },
     `Inspect ${project.label}`
   );
+  populateFoodModel(group, project, shelfTop, index, loadingPlate);
 }
 
 function addProjectShelves() {
-  const shelfHeights = [1.73, 0.83, -0.07, -0.94];
+  const shelfTops = [1.58, 0.68, -0.22, -1.09];
   fridgePortfolio.shelves.forEach((shelf, shelfIndex) => {
-    const y = shelfHeights[shelfIndex];
+    const shelfTop = shelfTops[shelfIndex];
     createLabelPlane(
       { width: 560, height: 180, background: shelf.color, color: "#ffffff", title: shelf.domain, lines: [shelf.cuisine], align: "center" },
       new THREE.Vector2(1.28, 0.32),
-      new THREE.Vector3(0, y + 0.38, -0.58),
+      new THREE.Vector3(0, shelfTop + 0.52, -0.58),
       fridge
     );
-    shelf.projects.forEach((project, index) => addProjectContainer(project, shelf, index, y));
+    shelf.projects.forEach((project, index) => addProjectContainer(project, shelf, index, shelfTop));
   });
 }
 

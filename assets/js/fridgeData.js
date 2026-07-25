@@ -76,18 +76,21 @@ export const fridgePortfolio = {
       projects: [
         {
           label: "MakoDB Contribution",
+          foodModel: "pan-stew",
           stack: "C++ · Rust · Python · RocksDB",
           detail: "Added persistence and replay support, completed the macOS ARM64 build path, fixed portability issues, and validated 68/68 tests.",
           url: "https://github.com/SoumojitDalui/makodb"
         },
         {
           label: "Consensus Ledger",
+          foodModel: "bowl-soup",
           stack: "Python · Paxos · 2PC",
           detail: "A sharded banking system exploring atomic cross-shard transactions and replicated consensus.",
           url: "https://github.com/SoumojitDalui/Consensus-Ledger"
         },
         {
           label: "Raft Consensus",
+          foodModel: "tajine",
           stack: "C++ · Distributed Systems",
           detail: "A C++ implementation of replicated logs and strong consistency using the Raft consensus algorithm.",
           url: "https://github.com/SoumojitDalui/Raft-Consensus-Algorithm-Implementation-CPP"
@@ -102,18 +105,21 @@ export const fridgePortfolio = {
       projects: [
         {
           label: "SciPy Search Assistant",
+          foodModel: "chinese",
           stack: "Python · NumPy · scikit-learn",
           detail: "Semantic-style source and documentation search using chunking, TF-IDF, cosine similarity, and ranked developer context.",
           url: "https://github.com/SoumojitDalui/scipy-codebase-search-assistant"
         },
         {
           label: "Semantic Book Explorer",
+          foodModel: "dim-sum",
           stack: "Python · Embeddings",
           detail: "Nearest-neighbor book discovery with similarity scoring and an interactive relationship map.",
           url: "https://github.com/SoumojitDalui/semantic-book-explorer"
         },
         {
           label: "Domain Adaptation NanoGPT",
+          foodModel: "steamer",
           stack: "Python · PyTorch",
           detail: "Repeatable language-model adaptation experiments across datasets, checkpoints, and output quality signals.",
           url: "https://github.com/SoumojitDalui/domain-adaptation-nanogpt"
@@ -128,18 +134,21 @@ export const fridgePortfolio = {
       projects: [
         {
           label: "SQMC Website",
+          foodModel: "pizza",
           stack: "Next.js · React · TypeScript",
           detail: "A public responsive website with API routes, validated forms, reusable UI, SEO pages, and Git-based delivery.",
           url: "https://github.com/SoumojitDalui/SQMCWebsite"
         },
         {
           label: "Invoice System",
+          foodModel: "loaf-baguette",
           stack: "Django REST · React",
           detail: "A full-stack invoice management system designed around scalable APIs and practical operations workflows.",
           url: "https://github.com/SoumojitDalui/FullStack-Invoice-System"
         },
         {
           label: "Transfer Songs",
+          foodModel: "salad",
           stack: "Python · REST · OAuth",
           detail: "Transfers Spotify playlists to YouTube Music with matching, duplicate detection, rate-limit handling, and validation.",
           url: "https://github.com/SoumojitDalui/Transfer-Songs"
@@ -154,18 +163,21 @@ export const fridgePortfolio = {
       projects: [
         {
           label: "Echoes of Two Realms",
+          foodModel: "maki-salmon",
           stack: "Unity · C# · FastAPI · Gemini",
           detail: "A Meta Quest escape-room prototype combining interaction state, puzzles, scene transitions, and AI narration.",
           url: "https://github.com/SoumojitDalui/EchoesOfTwoRealms"
         },
         {
           label: "VR Campus Interaction",
+          foodModel: "sushi-egg",
           stack: "Unity XR · C#",
           detail: "A virtual campus exploring gaze selection, fruit collection, bird feeding, minimaps, and spatial teleportation.",
           url: "https://github.com/SoumojitDalui/vr-campus-3dui-bird-feeding"
         },
         {
           label: "Talk To Mute",
+          foodModel: "rice-ball",
           stack: "Python · Audio Utility",
           detail: "A desktop utility that detects speech and triggers push-to-mute behavior for voice chat.",
           url: "https://github.com/SoumojitDalui/Talk_To_Mute"
