@@ -1,19 +1,11 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-const EZ_TREE_RAW_BASE = "https://raw.githubusercontent.com/dgreenheck/ez-tree/main/src/app/public";
 const EZ_TREE_MEDIA_BASE = "https://media.githubusercontent.com/media/dgreenheck/ez-tree/main/src/app/public";
 
 const TEXTURES = {
   grass: `${EZ_TREE_MEDIA_BASE}/textures/ground/grass.jpg`,
   dirt: `${EZ_TREE_MEDIA_BASE}/textures/ground/dirt_color.jpg`,
   dirtNormal: `${EZ_TREE_MEDIA_BASE}/textures/ground/dirt_normal.jpg`
-};
-
-const MODELS = {
-  whiteFlower: `${EZ_TREE_RAW_BASE}/models/flower_white.glb`,
-  blueFlower: `${EZ_TREE_RAW_BASE}/models/flower_blue.glb`,
-  yellowFlower: `${EZ_TREE_RAW_BASE}/models/flower_yellow.glb`
 };
 
 function hashString(value) {
@@ -34,6 +26,50 @@ function randomFactory(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     const unit = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     return min + (max - min) * unit;
+  };
+}
+
+function createPerlinNoise2D(seed) {
+  const random = randomFactory(`${seed}:perlin`);
+  const permutation = Array.from({ length: 256 }, (_, index) => index);
+
+  for (let i = permutation.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random(0, i + 1));
+    [permutation[i], permutation[j]] = [permutation[j], permutation[i]];
+  }
+
+  const p = [...permutation, ...permutation];
+  const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const grad = (hash, x, y) => {
+    switch (hash & 3) {
+      case 0:
+        return x + y;
+      case 1:
+        return -x + y;
+      case 2:
+        return x - y;
+      default:
+        return -x - y;
+    }
+  };
+
+  return (x, y) => {
+    const xi = Math.floor(x) & 255;
+    const yi = Math.floor(y) & 255;
+    const xf = x - Math.floor(x);
+    const yf = y - Math.floor(y);
+    const u = fade(xf);
+    const v = fade(yf);
+
+    const aa = p[p[xi] + yi];
+    const ab = p[p[xi] + yi + 1];
+    const ba = p[p[xi + 1] + yi];
+    const bb = p[p[xi + 1] + yi + 1];
+    const x1 = lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
+    const x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
+
+    return 0.5 + 0.5 * lerp(x1, x2, v);
   };
 }
 
@@ -114,21 +150,11 @@ function addGroundShader(material, options) {
   };
 }
 
-async function loadModel(url) {
-  const loader = new GLTFLoader();
-  loader.setCrossOrigin("anonymous");
-  const gltf = await loader.loadAsync(url);
-  let mesh = null;
-  gltf.scene.traverse((child) => {
-    if (!mesh && child.isMesh) mesh = child;
-  });
-  return mesh;
-}
-
 function createTriangleGrass(seed, grassTexture) {
   const random = randomFactory(`${seed}:triangle-glsl-grass`);
-  const bladeCount = 52000;
-  const patchRadius = 21;
+  const grassHeightNoise = createPerlinNoise2D(`${seed}:grass-height`);
+  const bladeCount = 400000;
+  const patchRadius = 34;
   const positions = [];
   const colors = [];
   const uvs = [];
@@ -139,17 +165,31 @@ function createTriangleGrass(seed, grassTexture) {
   const yaw = new THREE.Vector3();
 
   for (let i = 0; i < bladeCount; i += 1) {
-    const radius = patchRadius * Math.sqrt(random());
+    const radius = patchRadius * Math.pow(random(), 2.25);
     const angle = random(0, Math.PI * 2);
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
-    const path = Math.abs(x * 0.18 + z - 2.2) < 0.38 && z > 0.2;
-    if (path && random() > 0.28) continue;
-
     const bladeYaw = random(0, Math.PI * 2);
     yaw.set(Math.sin(bladeYaw), 0, -Math.cos(bladeYaw));
-    const nearScale = THREE.MathUtils.clamp(1 - radius / (patchRadius * 1.12), 0.54, 1);
-    const height = random(path ? 0.08 : 0.16, path ? 0.18 : 0.42) * nearScale;
+    const nearScale = THREE.MathUtils.clamp(1 - radius / (patchRadius * 1.6), 0.34, 1);
+    const tallZone = 1 - THREE.MathUtils.smoothstep(radius, 9, 18);
+    const edgeFade = 1 - THREE.MathUtils.smoothstep(radius, 20, patchRadius);
+    const shortMin = 0.14;
+    const shortMax = 0.32;
+    const tallMin = 0.4;
+    const tallMax = 0.98;
+    const broadNoise = grassHeightNoise(x * 0.16, z * 0.16);
+    const detailNoise = grassHeightNoise(x * 0.48 + 37.2, z * 0.48 - 18.6);
+    const heightVariation = THREE.MathUtils.clamp(broadNoise * 0.78 + detailNoise * 0.22, 0, 1);
+    const coherentHeightScale = THREE.MathUtils.lerp(0.34, 1, heightVariation);
+    const fieldHeight = THREE.MathUtils.lerp(
+      THREE.MathUtils.lerp(shortMin, tallMin, tallZone),
+      THREE.MathUtils.lerp(shortMax, tallMax, tallZone),
+      heightVariation
+    ) * coherentHeightScale * nearScale * Math.max(edgeFade, 0.18);
+    const treeDistance = Math.hypot(x, z);
+    const trunkGrassBlend = THREE.MathUtils.smoothstep(treeDistance, 1.15, 4.8);
+    const height = THREE.MathUtils.lerp(0.15, fieldHeight, trunkGrassBlend);
     const shade = random(0, 1);
     const uv = [
       THREE.MathUtils.mapLinear(x, -patchRadius, patchRadius, 0, 1),
@@ -185,14 +225,20 @@ function createTriangleGrass(seed, grassTexture) {
     vertexColors: true,
     side: THREE.DoubleSide,
     transparent: false,
-    uniforms: {
-      uTime: { value: 0 },
-      uDiffuseMap: { value: grassTexture },
-      uBladeWidth: { value: 0.034 },
-      uWindDirection: { value: Math.PI * 0.25 },
-      uWindSpeed: { value: 1.15 },
-      uWindNoiseScale: { value: 1.75 }
-    },
+    fog: true,
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.fog,
+      {
+        uTime: { value: 0 },
+        uDiffuseMap: { value: grassTexture },
+        uBladeWidth: { value: 0.052 },
+        uWindDirection: { value: Math.PI * 0.25 },
+        uWindSpeed: { value: 1.15 },
+        uWindNoiseScale: { value: 1.75 },
+        uWindStrength: { value: 1 },
+        uWindGust: { value: 1 }
+      }
+    ]),
     vertexShader: `
       attribute vec3 aYaw;
       attribute vec3 aBladeOrigin;
@@ -203,9 +249,13 @@ function createTriangleGrass(seed, grassTexture) {
       uniform float uWindDirection;
       uniform float uWindSpeed;
       uniform float uWindNoiseScale;
+      uniform float uWindStrength;
+      uniform float uWindGust;
       varying vec2 vUv;
       varying float vTip;
       varying float vShade;
+      varying float vDistanceFade;
+      #include <fog_pars_vertex>
 
       void main() {
         vec3 transformed = aBladeOrigin;
@@ -220,12 +270,17 @@ function createTriangleGrass(seed, grassTexture) {
         float windA = sin(uTime * uWindSpeed + dot(aBladeOrigin.xz, vec2(0.61, 0.37)) * uWindNoiseScale);
         float windB = cos(uTime * uWindSpeed * 1.43 + dot(aBladeOrigin.xz, vec2(-0.29, 0.71)) * uWindNoiseScale);
         vec3 windDirection = vec3(cos(uWindDirection), 0.0, sin(uWindDirection));
-        transformed += windDirection * tip * (windA * 0.5 + windB * 0.5) * height * 0.18;
+        transformed += windDirection * tip * (windA * 0.5 + windB * 0.5) * height * 0.18 * uWindStrength * uWindGust;
 
         vUv = uv;
         vTip = tip;
         vShade = aGrassShade;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
+    // Soften distant blades a bit earlier so the yard wall never reveals bare ground.
+        float distanceFromCenter = length(aBladeOrigin.xz);
+        vDistanceFade = 1.0 - smoothstep(8.0, 22.0, distanceFromCenter);
+        vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
       }
     `,
     fragmentShader: `
@@ -233,6 +288,8 @@ function createTriangleGrass(seed, grassTexture) {
       varying vec2 vUv;
       varying float vTip;
       varying float vShade;
+      varying float vDistanceFade;
+      #include <fog_pars_fragment>
 
       void main() {
         vec3 sampled = texture2D(uDiffuseMap, vUv * 18.0).rgb;
@@ -242,7 +299,9 @@ function createTriangleGrass(seed, grassTexture) {
         vec3 bladeColor = mix(shadowGreen, midGreen, vShade);
         bladeColor = mix(bladeColor, tipGreen, vTip * 0.42);
         bladeColor *= mix(vec3(0.82), sampled * 1.22, 0.36);
+        bladeColor = mix(bladeColor * 0.78, bladeColor, vDistanceFade);
         gl_FragColor = vec4(bladeColor, 1.0);
+        #include <fog_fragment>
       }
     `
   });
@@ -251,26 +310,15 @@ function createTriangleGrass(seed, grassTexture) {
   mesh.frustumCulled = false;
   return {
     mesh,
-    update(time) {
+    update(time, wind = {}) {
       material.uniforms.uTime.value = time;
+      material.uniforms.uWindDirection.value = wind.direction ?? material.uniforms.uWindDirection.value;
+      material.uniforms.uWindSpeed.value = wind.speed ?? material.uniforms.uWindSpeed.value;
+      material.uniforms.uWindNoiseScale.value = wind.noiseScale ?? material.uniforms.uWindNoiseScale.value;
+      material.uniforms.uWindStrength.value = wind.strength ?? material.uniforms.uWindStrength.value;
+      material.uniforms.uWindGust.value = wind.gust ?? material.uniforms.uWindGust.value;
     }
   };
-}
-
-function addFlowers(root, flowerMeshes, seed) {
-  const random = randomFactory(`${seed}:ez-real-flowers`);
-  for (let i = 0; i < 72; i += 1) {
-    const source = flowerMeshes[i % flowerMeshes.length];
-    if (!source) continue;
-    const flower = source.clone();
-    const radius = random(1.2, 14);
-    const angle = random(0, Math.PI * 2);
-    flower.position.set(Math.cos(angle) * radius, -0.99, Math.sin(angle) * radius);
-    flower.rotation.y = random(0, Math.PI * 2);
-    const scale = random(0.0025, 0.0055);
-    flower.scale.setScalar(scale);
-    root.add(flower);
-  }
 }
 
 export async function addEzEnvironment(scene, root, seed) {
@@ -286,24 +334,17 @@ export async function addEzEnvironment(scene, root, seed) {
   });
   addGroundShader(groundMaterial, {
     noiseScale: 26,
-    patchiness: 0.64,
+    patchiness: 0.84,
     grassTexture,
     dirtTexture
   });
 
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(180, 180), groundMaterial);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(420, 420), groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -1.035;
   scene.add(ground);
 
-  const [whiteFlower, blueFlower, yellowFlower] = await Promise.all([
-    loadModel(MODELS.whiteFlower).catch(() => null),
-    loadModel(MODELS.blueFlower).catch(() => null),
-    loadModel(MODELS.yellowFlower).catch(() => null)
-  ]);
-
   const grass = createTriangleGrass(seed, grassTexture);
   root.add(grass.mesh);
-  addFlowers(root, [whiteFlower, blueFlower, yellowFlower].filter(Boolean), seed);
   return grass;
 }

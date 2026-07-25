@@ -1,78 +1,420 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-import { focusTargets, resumeTreeData } from "./data.js?v=glsl-grass2";
-import { buildPortfolioLayout, seededRange } from "./layout.js?v=glsl-grass2";
-import { addEzEnvironment } from "./ezEnvironment.js?v=glsl-grass2";
-import { createEzTreeFromResume, resumeToEzTreeOptions } from "./ezTreeAdapter.js?v=glsl-grass2";
-import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=glsl-grass2";
-import { createMaterials } from "./materials.js?v=glsl-grass2";
+import { focusTargets, resumeTreeData } from "./data.js?v=first-person";
+import { buildPortfolioLayout, seededRange } from "./layout.js?v=first-person";
+import { addEzEnvironment } from "./ezEnvironment.js?v=first-person";
+import { createEzTreeFromResume, resumeToEzTreeOptions, getFruitAnchorForDomain } from "./ezTreeAdapter.js?v=first-person";
+import { createTextLabel as createSpriteTextLabel } from "./labels.js?v=first-person";
+import { createMaterials } from "./materials.js?v=first-person";
+import { shouldUseEzTree } from "./sceneConfig.js?v=first-person";
+import { getTimePalette, resolveTimeOfDay } from "./timeOfDay.js?v=first-person";
+import { shouldFocusCameraAfterSelection } from "./interactionPolicy.js?v=first-person";
+
+let activeTimeOfDay = resolveTimeOfDay(window.location.search);
+let activeTimePalette = getTimePalette(activeTimeOfDay.hour);
+let lastTimePaletteRefresh = 0;
 
 // Renderer and camera setup
 const canvas = document.querySelector("#tree-scene");
+const walkHint = document.querySelector("#walk-hint");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = activeTimePalette.exposure;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0xdff3d5, 0.026);
+scene.fog = new THREE.FogExp2(activeTimePalette.fog, activeTimePalette.fogDensity);
 
-const camera = new THREE.PerspectiveCamera(44, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 2.6, 8.5);
+const PLAYER = {
+  groundY: -1.035,
+  eyeHeight: 1.62,
+  speed: 3.35,
+  sprintMultiplier: 1.55,
+  bodyRadius: 0.32,
+  trunkClearance: 0.72,
+  lookPitchMin: -0.95,
+  lookPitchMax: 0.85
+};
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.055;
-controls.minDistance = 4.2;
-controls.maxDistance = 11.5;
-controls.maxPolarAngle = Math.PI * 0.56;
-controls.target.set(0, 1.7, 0);
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.08, 240);
+camera.position.set(0, PLAYER.groundY + PLAYER.eyeHeight, 6.4);
+camera.rotation.order = "YXZ";
+
+const controls = new PointerLockControls(camera, renderer.domElement);
+
+const YARD_BOUNDS = {
+  softCameraRadius: 7.2,
+  hardCameraRadius: 8.4,
+  fogStart: 5.2,
+  fogBoost: 0.72
+};
 
 const root = new THREE.Group();
 scene.add(root);
 const portfolioLayout = buildPortfolioLayout(resumeTreeData);
 const ezTreeOptions = resumeToEzTreeOptions(resumeTreeData);
-const useEzTreeSkeleton = new URLSearchParams(window.location.search).get("skeleton") === "ez";
+const useEzTreeSkeleton = shouldUseEzTree(window.location.search);
 
 const selectable = [];
 const labels = [];
 let selectedObject = null;
-let desiredCamera = camera.position.clone();
-let desiredTarget = controls.target.clone();
+let desiredPlayerPosition = new THREE.Vector3(camera.position.x, 0, camera.position.z);
+let desiredLookAt = new THREE.Vector3(0, 0.55, 0);
 let frameCount = 0;
-let isCameraAnimating = false;
+let isPlayerNavigating = false;
 let environmentController = null;
+let ezTree = null;
+let ezTreeAnchors = null;
+let projectFruitPrototype = null;
+let lastFrameTime = performance.now();
+const treeWindUniforms = [];
+const lightRig = {};
+const fruitLoader = new GLTFLoader();
+const moveKeys = {
+  forward: false,
+  backward: false,
+  left: false,
+  right: false,
+  sprint: false
+};
+const walkDirection = new THREE.Vector3();
+const yardScratchDirection = new THREE.Vector3();
 
 const materials = createMaterials();
+const globalWind = {
+  direction: Math.PI * 0.23,
+  speed: 1.08,
+  noiseScale: 1.7,
+  strength: 0.82
+};
+
+function getGlobalWindState(seconds) {
+  const slowGust = 0.5 + 0.5 * Math.sin(seconds * 0.42 + 1.6);
+  const fastGust = 0.5 + 0.5 * Math.sin(seconds * 1.35 + 0.4);
+  return {
+    ...globalWind,
+    gust: 0.72 + slowGust * 0.2 + fastGust * 0.08
+  };
+}
+
+function clampToRadius(vector, radius) {
+  const length = Math.hypot(vector.x, vector.z);
+  if (length <= radius || length < 1e-6) return vector;
+  const scale = radius / length;
+  vector.x *= scale;
+  vector.z *= scale;
+  return vector;
+}
+
+function keepClearOfTrunk(position) {
+  const radial = Math.hypot(position.x, position.z);
+  if (radial >= PLAYER.trunkClearance || radial < 1e-6) return position;
+  const scale = PLAYER.trunkClearance / radial;
+  position.x *= scale;
+  position.z *= scale;
+  return position;
+}
+
+function setPlayerOnGround(x = camera.position.x, z = camera.position.z) {
+  camera.position.set(x, PLAYER.groundY + PLAYER.eyeHeight, z);
+  keepClearOfTrunk(camera.position);
+  clampToRadius(camera.position, YARD_BOUNDS.hardCameraRadius);
+  camera.position.y = PLAYER.groundY + PLAYER.eyeHeight;
+}
+
+function enforceYardBounds() {
+  keepClearOfTrunk(camera.position);
+  clampToRadius(camera.position, YARD_BOUNDS.hardCameraRadius);
+
+  const cameraRadius = Math.hypot(camera.position.x, camera.position.z);
+  if (cameraRadius > YARD_BOUNDS.softCameraRadius) {
+    const pull = THREE.MathUtils.smoothstep(
+      YARD_BOUNDS.softCameraRadius,
+      YARD_BOUNDS.hardCameraRadius,
+      cameraRadius
+    );
+    const softScale = 1 - pull * 0.1;
+    camera.position.x *= softScale;
+    camera.position.z *= softScale;
+  }
+
+  camera.position.y = PLAYER.groundY + PLAYER.eyeHeight;
+}
+
+function updateBoundaryFog() {
+  if (!scene.fog) return;
+  const cameraRadius = Math.hypot(camera.position.x, camera.position.z);
+  const edgeFactor = THREE.MathUtils.smoothstep(
+    YARD_BOUNDS.fogStart,
+    YARD_BOUNDS.hardCameraRadius,
+    cameraRadius
+  );
+  const lookOut = Math.max(0, -camera.getWorldDirection(yardScratchDirection).y);
+  const horizonFactor = THREE.MathUtils.smoothstep(0.02, 0.22, lookOut) * 0.35;
+  const veil = Math.max(edgeFactor, horizonFactor * edgeFactor);
+  scene.fog.density = activeTimePalette.fogDensity * (1 + veil * YARD_BOUNDS.fogBoost);
+}
+
+function updatePlayerMovement(deltaSeconds) {
+  if (isPlayerNavigating) {
+    const current = new THREE.Vector3(camera.position.x, 0, camera.position.z);
+    current.lerp(desiredPlayerPosition, Math.min(1, deltaSeconds * 2.4));
+    setPlayerOnGround(current.x, current.z);
+    camera.lookAt(desiredLookAt);
+    camera.rotation.order = "YXZ";
+    camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x, PLAYER.lookPitchMin, PLAYER.lookPitchMax);
+
+    if (current.distanceTo(desiredPlayerPosition) < 0.08) {
+      setPlayerOnGround(desiredPlayerPosition.x, desiredPlayerPosition.z);
+      camera.lookAt(desiredLookAt);
+      camera.rotation.order = "YXZ";
+      isPlayerNavigating = false;
+    }
+    return;
+  }
+
+  if (!controls.isLocked) return;
+
+  const speed = PLAYER.speed * (moveKeys.sprint ? PLAYER.sprintMultiplier : 1);
+  walkDirection.set(0, 0, 0);
+  if (moveKeys.forward) walkDirection.z += 1;
+  if (moveKeys.backward) walkDirection.z -= 1;
+  if (moveKeys.left) walkDirection.x -= 1;
+  if (moveKeys.right) walkDirection.x += 1;
+
+  if (walkDirection.lengthSq() > 0) {
+    walkDirection.normalize();
+    controls.moveRight(walkDirection.x * speed * deltaSeconds);
+    controls.moveForward(walkDirection.z * speed * deltaSeconds);
+  }
+
+  setPlayerOnGround(camera.position.x, camera.position.z);
+  camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x, PLAYER.lookPitchMin, PLAYER.lookPitchMax);
+}
 
 async function addEzTreeSkeleton() {
-  const ezTree = await createEzTreeFromResume(resumeTreeData);
+  ezTree = await createEzTreeFromResume(resumeTreeData);
+  applyTreeWindShader(ezTree);
   root.add(ezTree);
+  root.updateMatrixWorld(true);
+  ezTreeAnchors = collectEzTreeAnchors(ezTree);
   return ezTree;
+}
+
+async function loadProjectFruitModel() {
+  const gltf = await fruitLoader.loadAsync("./assets/models/pomegranate.glb");
+  projectFruitPrototype = gltf.scene;
+  projectFruitPrototype.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
+}
+
+function collectEzTreeAnchors(tree) {
+  const leaves = [];
+  const bark = [];
+  const point = new THREE.Vector3();
+
+  tree.traverse((child) => {
+    if (!child.isMesh || !child.geometry?.attributes?.position) return;
+
+    const materialList = Array.isArray(child.material) ? child.material : [child.material];
+    const isLeaf = materialList.some((material) => material?.alphaTest > 0 || material?.transparent);
+    const destination = isLeaf ? leaves : bark;
+    const positions = child.geometry.attributes.position;
+    const stride = Math.max(1, Math.floor(positions.count / 180));
+
+    for (let index = 0; index < positions.count; index += stride) {
+      point.fromBufferAttribute(positions, index);
+      child.localToWorld(point);
+      root.worldToLocal(point);
+      destination.push(point.clone());
+    }
+  });
+
+  const bounds = leaves.reduce((result, point) => ({
+    minY: Math.min(result.minY, point.y),
+    maxY: Math.max(result.maxY, point.y)
+  }), { minY: Infinity, maxY: -Infinity });
+
+  return { leaves, bark, bounds };
+}
+
+function getEzCanopyAnchor(index, project) {
+  const candidates = ezTreeAnchors?.leaves || [];
+  if (candidates.length === 0) {
+    const scale = ezTree?.userData.adapter?.scale || 0.13;
+    return project.position.clone().multiplyScalar(scale).add(new THREE.Vector3(0, -1.02, 0));
+  }
+
+  const { minY, maxY } = ezTreeAnchors.bounds;
+  const projectBranchIds = [...new Set(portfolioLayout.fruits.map((fruit) => fruit.branch))];
+  const branchIndex = Math.max(projectBranchIds.indexOf(project.branch), 0);
+  const projectsOnBranch = portfolioLayout.fruits.filter((fruit) => fruit.branch === project.branch);
+  const projectIndex = Math.max(projectsOnBranch.findIndex((fruit) => fruit.id === project.id), 0);
+  const branchProgress = projectBranchIds.length > 1 ? branchIndex / (projectBranchIds.length - 1) : 0.5;
+  const projectProgress = projectsOnBranch.length > 1 ? projectIndex / (projectsOnBranch.length - 1) - 0.5 : 0;
+  const angle = THREE.MathUtils.lerp(-1.22, 1.22, branchProgress) + projectProgress * 0.3;
+  const heightProgress = 0.3 + ((projectIndex + branchIndex) % 3) * 0.2;
+  const desired = new THREE.Vector3(
+    Math.sin(angle) * (0.5 + project.weight * 0.22),
+    THREE.MathUtils.lerp(minY, maxY, heightProgress),
+    Math.cos(angle) * (0.38 + project.weight * 0.18)
+  );
+
+  let bestPoint = candidates[0];
+  let bestScore = Infinity;
+  candidates.forEach((point) => {
+    const radialDifference = Math.abs(Math.hypot(point.x, point.z) - Math.hypot(desired.x, desired.z));
+    const angleDifference = Math.abs(Math.atan2(point.x, point.z) - Math.atan2(desired.x, desired.z));
+    const normalizedAngle = Math.min(angleDifference, Math.PI * 2 - angleDifference);
+    const score = point.distanceToSquared(desired) + radialDifference * 0.5 + normalizedAngle * 0.32;
+    if (score < bestScore) {
+      bestScore = score;
+      bestPoint = point;
+    }
+  });
+
+  return bestPoint.clone();
+}
+
+function getEzBranchAttachment(canopyPoint) {
+  const candidates = (ezTreeAnchors?.bark || []).filter((point) => Math.hypot(point.x, point.z) > 0.55);
+  if (candidates.length === 0) return canopyPoint.clone();
+  const lateralCandidates = candidates.filter((point) => Math.abs(point.x) > 0.65);
+  const branchCandidates = lateralCandidates.length > 0 ? lateralCandidates : candidates;
+
+  return branchCandidates.reduce((closest, point) => (
+    point.distanceToSquared(canopyPoint) < closest.distanceToSquared(canopyPoint) ? point : closest
+  ), candidates[0]).clone();
+}
+
+function getEzTrunkCenter(targetY) {
+  const candidates = ezTreeAnchors?.bark || [];
+  if (candidates.length === 0) return new THREE.Vector3(0, targetY, 0);
+
+  const nearby = candidates.filter((point) => (
+    Math.abs(point.y - targetY) < 0.14 && Math.hypot(point.x, point.z) < 0.7
+  ));
+  if (nearby.length > 0) {
+    const center = nearby.reduce((sum, point) => sum.add(point), new THREE.Vector3());
+    center.multiplyScalar(1 / nearby.length);
+    return new THREE.Vector3(center.x, targetY, center.z);
+  }
+
+  const point = candidates.reduce((best, candidate) => (
+    Math.abs(candidate.y - targetY) < Math.abs(best.y - targetY) ? candidate : best
+  ), candidates[0]);
+
+  return new THREE.Vector3(point.x, targetY, point.z);
+}
+
+function getEzTrunkLabelAnchor(targetY, fallback) {
+  if (!useEzTreeSkeleton) return fallback;
+  const center = getEzTrunkCenter(targetY);
+  return center.add(new THREE.Vector3(0, 0, 0.25));
 }
 
 // Environment
 function addLights() {
-  scene.add(new THREE.HemisphereLight(0xffffe6, 0x8fcf79, 2.05));
+  lightRig.hemisphere = new THREE.HemisphereLight(0xffffe6, 0x8fcf79, 2.05);
+  scene.add(lightRig.hemisphere);
 
-  const key = new THREE.DirectionalLight(0xffefba, 2.35);
-  key.position.set(3.2, 8, 4.5);
-  scene.add(key);
+  lightRig.key = new THREE.DirectionalLight(0xffefba, 2.35);
+  scene.add(lightRig.key);
+  applyTimeOfDay();
+}
 
-  const rim = new THREE.PointLight(0xc8f7ff, 8, 12, 2.2);
-  rim.position.set(-4, 4.2, 3.4);
-  scene.add(rim);
+function applyTimeOfDay() {
+  activeTimeOfDay = resolveTimeOfDay(window.location.search);
+  activeTimePalette = getTimePalette(activeTimeOfDay.hour);
+  const sunProgress = Math.max(0, Math.sin(((activeTimeOfDay.hour - 6) / 12) * Math.PI));
+  const sunAngle = ((activeTimeOfDay.hour - 6) / 24) * Math.PI * 2;
 
-  const sunGlow = new THREE.PointLight(0xffd36a, 10, 14, 2.8);
-  sunGlow.position.set(4.2, 5.6, -3.2);
-  scene.add(sunGlow);
+  renderer.toneMappingExposure = activeTimePalette.exposure;
+  scene.fog.color.set(activeTimePalette.fog);
+  scene.fog.density = activeTimePalette.fogDensity;
+  document.documentElement.style.setProperty("--sky-top", activeTimePalette.skyTop);
+  document.documentElement.style.setProperty("--sky-middle", activeTimePalette.skyMiddle);
+  document.documentElement.style.setProperty("--sky-bottom", activeTimePalette.skyBottom);
+  document.documentElement.style.setProperty("--sky-glow", activeTimePalette.skyGlow);
+  document.documentElement.style.setProperty("--sky-haze", activeTimePalette.skyHaze);
+
+  if (!lightRig.hemisphere) return;
+  lightRig.hemisphere.color.set(activeTimePalette.sun);
+  lightRig.hemisphere.groundColor.set(activeTimePalette.ground);
+  lightRig.hemisphere.intensity = activeTimePalette.ambientIntensity;
+  lightRig.key.color.set(activeTimePalette.sun);
+  lightRig.key.intensity = activeTimePalette.sunIntensity;
+  lightRig.key.position.set(Math.cos(sunAngle) * 6, 1.8 + sunProgress * 7.5, Math.sin(sunAngle) * 5);
 }
 
 async function addGround() {
   environmentController = await addEzEnvironment(scene, root, resumeTreeData.seed);
+}
+
+function applyTreeWindShader(tree) {
+  tree.traverse((child) => {
+    if (!child.isMesh || !child.material) return;
+
+    const materialsToPatch = Array.isArray(child.material) ? child.material : [child.material];
+    const patchedMaterials = materialsToPatch.map((material) => {
+      const patched = material.clone();
+      const previousOnBeforeCompile = patched.onBeforeCompile;
+
+      patched.onBeforeCompile = (shader) => {
+        if (typeof previousOnBeforeCompile === "function") {
+          previousOnBeforeCompile(shader);
+        }
+
+        shader.uniforms.uTreeWindDirection = { value: globalWind.direction };
+        shader.uniforms.uTreeWindPhase = { value: 0 };
+        shader.uniforms.uTreeWindStrength = { value: 0.055 };
+        shader.uniforms.uTreeWindGust = { value: 1 };
+        treeWindUniforms.push(shader.uniforms);
+
+        shader.vertexShader = `
+          uniform float uTreeWindDirection;
+          uniform float uTreeWindPhase;
+          uniform float uTreeWindStrength;
+          uniform float uTreeWindGust;
+        ${shader.vertexShader}`;
+
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `
+          #include <begin_vertex>
+          float treeWindHeight = smoothstep(1.15, 4.6, transformed.y);
+          float treeWindOutward = smoothstep(0.48, 1.05, length(transformed.xz));
+          float branchLeafResponse = treeWindHeight * treeWindOutward;
+          float windWave = sin(uTreeWindPhase + transformed.y * 1.5 + transformed.x * 0.32 + transformed.z * 0.27);
+          vec2 treeWindDirection = vec2(cos(uTreeWindDirection), sin(uTreeWindDirection));
+          transformed.xz += treeWindDirection * windWave * branchLeafResponse * uTreeWindStrength * uTreeWindGust;
+          `
+        );
+      };
+
+      patched.needsUpdate = true;
+      return patched;
+    });
+
+    child.material = Array.isArray(child.material) ? patchedMaterials : patchedMaterials[0];
+  });
+}
+
+function updateTreeWind(seconds, wind) {
+  treeWindUniforms.forEach((uniforms) => {
+    uniforms.uTreeWindDirection.value = wind.direction;
+    uniforms.uTreeWindPhase.value = seconds * wind.speed;
+    uniforms.uTreeWindStrength.value = 0.055 * wind.strength;
+    uniforms.uTreeWindGust.value = wind.gust;
+  });
 }
 
 function addDirtPatches() {
@@ -97,27 +439,6 @@ function addDirtPatches() {
   });
 }
 
-function addFlowers() {
-  const stemGeometry = new THREE.CylinderGeometry(0.006, 0.009, 0.13, 5);
-  const bloomGeometry = new THREE.IcosahedronGeometry(0.032, 1);
-
-  for (let i = 0; i < 72; i += 1) {
-    const angle = i * 2.399963 + seededRange(resumeTreeData.seed, `flower-angle:${i}`, -0.18, 0.18);
-    const radius = 1.45 + seededRange(resumeTreeData.seed, `flower-radius:${i}`, 0, 9.4);
-
-    const stem = new THREE.Mesh(stemGeometry, materials.grassDark);
-    stem.position.set(Math.cos(angle) * radius, -0.955, Math.sin(angle) * radius);
-    stem.rotation.z = seededRange(resumeTreeData.seed, `flower-lean:${i}`, -0.22, 0.22);
-    root.add(stem);
-
-    const bloom = new THREE.Mesh(bloomGeometry, i % 5 === 0 ? materials.flowerYellow : materials.flower);
-    bloom.position.copy(stem.position);
-    bloom.position.y += 0.09;
-    bloom.scale.setScalar(seededRange(resumeTreeData.seed, `flower-scale:${i}`, 0.72, 1.3));
-    root.add(bloom);
-  }
-}
-
 function addCloud(position, scale = 1) {
   const cloud = new THREE.Group();
   const puffGeometry = new THREE.IcosahedronGeometry(0.45, 2);
@@ -140,75 +461,6 @@ function addCloud(position, scale = 1) {
   scene.add(cloud);
 }
 
-function addGrassField() {
-  const bladeShape = new THREE.Shape();
-  bladeShape.moveTo(-0.006, 0);
-  bladeShape.quadraticCurveTo(-0.004, 0.22, 0.001, 0.48);
-  bladeShape.quadraticCurveTo(0.009, 0.22, 0.006, 0);
-  bladeShape.closePath();
-
-  const bladeGeometry = new THREE.ShapeGeometry(bladeShape);
-  bladeGeometry.translate(0, 0.005, 0);
-  const bladeCount = 15000;
-  const grass = new THREE.InstancedMesh(bladeGeometry, materials.grass, bladeCount);
-  const darkGrass = new THREE.InstancedMesh(bladeGeometry, materials.grassDark, Math.floor(bladeCount * 0.38));
-  const dummy = new THREE.Object3D();
-  let grassIndex = 0;
-  let darkIndex = 0;
-
-  for (let clump = 0; clump < 980; clump += 1) {
-    const clumpAngle = clump * 2.399963 + seededRange(resumeTreeData.seed, `grass-clump-angle:${clump}`, -0.3, 0.3);
-    const clumpRadius = 0.82 + seededRange(resumeTreeData.seed, `grass-clump-radius:${clump}`, 0, 15.6);
-    const clumpCenter = new THREE.Vector3(Math.cos(clumpAngle) * clumpRadius, -1.0, Math.sin(clumpAngle) * clumpRadius);
-    const bladesInClump = Math.round(seededRange(resumeTreeData.seed, `grass-clump-count:${clump}`, 12, 24));
-
-    for (let blade = 0; blade < bladesInClump; blade += 1) {
-      const spreadAngle = seededRange(resumeTreeData.seed, `grass-spread-angle:${clump}:${blade}`, 0, Math.PI * 2);
-      const spreadRadius = seededRange(resumeTreeData.seed, `grass-spread-radius:${clump}:${blade}`, 0, 0.34);
-      const x = clumpCenter.x + Math.cos(spreadAngle) * spreadRadius;
-      const z = clumpCenter.z + Math.sin(spreadAngle) * spreadRadius;
-      const distanceFromCenter = Math.hypot(x, z);
-
-      if (distanceFromCenter > 16.2) continue;
-
-      const nearPath = Math.abs(x * 0.22 + z - 2.15) < 0.28 && z > 0.35;
-      const farFade = THREE.MathUtils.clamp(distanceFromCenter / 16.2, 0, 1);
-      const height = seededRange(resumeTreeData.seed, `grass-height:${clump}:${blade}`, nearPath ? 0.1 : 0.22, nearPath ? 0.23 : 0.68) * (1 - farFade * 0.24);
-      const width = seededRange(resumeTreeData.seed, `grass-width:${clump}:${blade}`, 0.42, 0.95);
-      const lean = seededRange(resumeTreeData.seed, `grass-lean:${clump}:${blade}`, -0.34, 0.34);
-      const tint = seededRange(resumeTreeData.seed, `grass-tint:${clump}:${blade}`, 0, 1);
-      const target = tint < 0.36 ? darkGrass : grass;
-      const targetIndex = tint < 0.36 ? darkIndex : grassIndex;
-
-      if (targetIndex >= target.count) continue;
-
-      dummy.position.set(x, -1.0, z);
-      dummy.rotation.set(
-        seededRange(resumeTreeData.seed, `grass-tilt-x:${clump}:${blade}`, -0.2, 0.2),
-        seededRange(resumeTreeData.seed, `grass-yaw:${clump}:${blade}`, 0, Math.PI * 2),
-        lean
-      );
-      dummy.scale.set(width, height, 1);
-      dummy.updateMatrix();
-      target.setMatrixAt(targetIndex, dummy.matrix);
-
-      if (tint < 0.36) {
-        darkIndex += 1;
-      } else {
-        grassIndex += 1;
-      }
-    }
-  }
-
-  grass.count = grassIndex;
-  darkGrass.count = darkIndex;
-  grass.instanceMatrix.needsUpdate = true;
-  darkGrass.instanceMatrix.needsUpdate = true;
-
-  root.add(grass);
-  root.add(darkGrass);
-}
-
 function tubeFromPoints(points, radius, material, segments = 36) {
   const curve = new THREE.CatmullRomCurve3(points);
   const geometry = new THREE.TubeGeometry(curve, segments, radius, 7, false);
@@ -223,6 +475,20 @@ function closedTubeFromPoints(points, radius, material, segments = 96) {
 
 function createTextLabel(text, position, options = {}) {
   return createSpriteTextLabel(root, labels, text, position, options);
+}
+
+function attachDiscoveryLabel(node, label) {
+  node.userData.discoveryLabel = label;
+}
+
+function revealDiscoveryLabel(node) {
+  labels.forEach((label) => {
+    if (!label.userData.alwaysVisible) label.visible = false;
+  });
+
+  if (node?.userData.discoveryLabel) {
+    node.userData.discoveryLabel.visible = true;
+  }
 }
 
 // Resume tree geometry
@@ -242,13 +508,15 @@ function addRoots() {
     mesh.userData.item = rootItem;
     root.add(mesh);
 
-    addNode("education", end.clone().add(new THREE.Vector3(0, 0.08, 0)), 0.07 + rootItem.weight * 0.065, materials.marker);
-    createTextLabel(rootItem.label, end.clone().add(new THREE.Vector3(0, 0.32, 0)), {
+    const rootNode = addNode("education", end.clone().add(new THREE.Vector3(0, 0.08, 0)), 0.07 + rootItem.weight * 0.065, materials.marker);
+    const label = createTextLabel(rootItem.label, end.clone().add(new THREE.Vector3(0, 0.32, 0)), {
       scale: 0.24,
       fontSize: 34,
       maxWidth: 300,
-      background: "rgba(255, 246, 219, 0.78)"
+      background: "rgba(255, 246, 219, 0.78)",
+      visible: false
     });
+    attachDiscoveryLabel(rootNode, label);
   });
 }
 
@@ -259,91 +527,288 @@ function addTrunk() {
   root.add(trunk);
 
   addNaturalBarkLines();
-  addExperienceRings();
-  addProfileLabels();
+  addTrunkSignboard();
 }
 
-function addProfileLabels() {
-  createTextLabel("Soumojit Dalui", new THREE.Vector3(0, 0.82, 0.58), {
-    scale: 0.29,
-    fontSize: 38,
-    maxWidth: 340,
-    background: "rgba(255, 230, 176, 0.86)"
+function createSignboardFaceTexture(profile) {
+  const width = 1024;
+  const height = 640;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  const wood = context.createLinearGradient(0, 0, width, height);
+  wood.addColorStop(0, "#e8c58a");
+  wood.addColorStop(0.45, "#d2a66a");
+  wood.addColorStop(1, "#b9844c");
+  context.fillStyle = wood;
+  context.fillRect(0, 0, width, height);
+
+  for (let i = 0; i < 28; i += 1) {
+    const y = 18 + i * 22;
+    context.strokeStyle = `rgba(108, 68, 28, ${0.05 + (i % 3) * 0.025})`;
+    context.lineWidth = 2 + (i % 2);
+    context.beginPath();
+    context.moveTo(20, y + Math.sin(i * 1.3) * 3);
+    context.bezierCurveTo(width * 0.35, y + 4, width * 0.65, y - 4, width - 20, y + Math.cos(i) * 3);
+    context.stroke();
+  }
+
+  context.strokeStyle = "rgba(78, 48, 22, 0.55)";
+  context.lineWidth = 10;
+  context.strokeRect(18, 18, width - 36, height - 36);
+
+  context.fillStyle = "rgba(255, 244, 214, 0.22)";
+  context.fillRect(42, 42, width - 84, height - 84);
+
+  const lines = [
+    { text: profile.name, size: 78, weight: 800, color: "#2d1c0f" },
+    { text: profile.profession, size: 46, weight: 650, color: "#4a3218" },
+    { text: profile.experienceLabel, size: 40, weight: 600, color: "#5b3a1c" },
+    { text: profile.latestCompany, size: 44, weight: 700, color: "#3a2410" }
+  ];
+
+  let cursorY = 168;
+  lines.forEach((line, index) => {
+    context.font = `${line.weight} ${line.size}px "Segoe UI", "Helvetica Neue", sans-serif`;
+    context.fillStyle = line.color;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(line.text, width / 2, cursorY);
+    cursorY += index === 0 ? 92 : 78;
+
+    if (index === 0) {
+      context.strokeStyle = "rgba(92, 58, 28, 0.35)";
+      context.lineWidth = 3;
+      context.beginPath();
+      context.moveTo(width * 0.22, cursorY - 42);
+      context.lineTo(width * 0.78, cursorY - 42);
+      context.stroke();
+    }
   });
-  createTextLabel("Software Engineer", new THREE.Vector3(0, 0.48, 0.6), {
-    scale: 0.22,
-    fontSize: 30,
-    maxWidth: 300,
-    background: "rgba(255, 248, 216, 0.78)"
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy?.() || 1);
+  return texture;
+}
+
+function getTrunkSignboardPlacement() {
+  const scale = ezTree?.userData?.adapter?.scale || 0.13;
+  const trunk = ezTree?.userData?.adapter?.skeletonBranches?.find((branch) => branch.level === 0);
+  const sections = trunk?.sections || [];
+
+  if (sections.length > 1) {
+    const trunkBase = ezLocalToRoot(sections[0].origin);
+    const trunkTip = ezLocalToRoot(sections[sections.length - 1].origin);
+    // Domain laterals begin near 34% up the trunk. Keep the board on clear bark below that.
+    const targetY = THREE.MathUtils.lerp(trunkBase.y, trunkTip.y, 0.28);
+    let bestSection = sections[0];
+    let bestDistance = Infinity;
+
+    sections.forEach((section) => {
+      const point = ezLocalToRoot(section.origin);
+      const distance = Math.abs(point.y - targetY);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSection = section;
+      }
+    });
+
+    const center = ezLocalToRoot(bestSection.origin);
+    const radius = Math.max(bestSection.radius * scale * 0.72, 0.08);
+    return {
+      center: new THREE.Vector3(center.x, targetY, center.z),
+      attachPoint: new THREE.Vector3(center.x, targetY, center.z + radius),
+      facing: new THREE.Vector3(0, 0, 1),
+      debug: {
+        targetY,
+        trunkBaseY: trunkBase.y,
+        trunkTipY: trunkTip.y,
+        radius,
+        sectionCount: sections.length
+      }
+    };
+  }
+
+  const boardY = 0.18;
+  const center = getEzTrunkCenter(boardY);
+  const radius = Math.max(trunkRadiusAt(boardY) * 0.7, 0.1);
+  return {
+    center: new THREE.Vector3(center.x, boardY, center.z),
+    attachPoint: new THREE.Vector3(center.x, boardY, center.z + radius),
+    facing: new THREE.Vector3(0, 0, 1),
+    debug: { targetY: boardY, radius, fallback: true }
+  };
+}
+
+function addTrunkSignboard() {
+  const profile = resumeTreeData.profile;
+  const placement = getTrunkSignboardPlacement();
+  const boardWidth = useEzTreeSkeleton ? 0.5 : 0.95;
+  const boardHeight = useEzTreeSkeleton ? 0.32 : 0.58;
+  const boardDepth = 0.03;
+
+  const faceTexture = createSignboardFaceTexture(profile);
+  const faceMaterial = materials.signboard.clone();
+  faceMaterial.map = faceTexture;
+  faceMaterial.color.set(0xffffff);
+  faceMaterial.needsUpdate = true;
+
+  const board = new THREE.Mesh(
+    new THREE.BoxGeometry(boardWidth, boardHeight, boardDepth),
+    [
+      materials.signboardEdge,
+      materials.signboardEdge,
+      materials.signboardEdge,
+      materials.signboardEdge,
+      faceMaterial,
+      materials.signboardEdge
+    ]
+  );
+
+  const facing = placement.facing.clone().normalize();
+  board.position.copy(placement.attachPoint).addScaledVector(facing, boardDepth * 0.5);
+  board.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), facing);
+  board.userData.type = "profile";
+  board.userData.baseScale = board.scale.clone();
+  board.userData.pulse = false;
+  board.userData.signboard = true;
+  board.userData.placementDebug = placement.debug;
+  root.add(board);
+  selectable.push(board);
+
+  const nailGeometry = new THREE.CylinderGeometry(0.009, 0.013, 0.048, 10);
+  const nailOffsets = [
+    [-boardWidth * 0.34, boardHeight * 0.3, 0.01],
+    [boardWidth * 0.34, boardHeight * 0.3, 0.01]
+  ];
+
+  nailOffsets.forEach(([x, y, z]) => {
+    const localOffset = new THREE.Vector3(x, y, z).applyQuaternion(board.quaternion);
+    const nail = new THREE.Mesh(nailGeometry, materials.nail);
+    nail.quaternion.copy(board.quaternion);
+    nail.rotateX(Math.PI / 2);
+    nail.position.copy(board.position).add(localOffset);
+    nail.userData.type = "profile";
+    root.add(nail);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.014, 10, 8), materials.nail);
+    head.position.copy(nail.position).addScaledVector(facing, 0.01);
+    head.userData.type = "profile";
+    root.add(head);
+  });
+}
+
+function ezLocalToRoot(point) {
+  if (!ezTree || !point) return new THREE.Vector3();
+  const world = ezTree.localToWorld(point.clone());
+  return root.worldToLocal(world);
+}
+
+function addEzDomainLabels() {
+  const bindings = ezTree?.userData?.adapter?.domainBindings || [];
+  bindings.forEach((binding) => {
+    if (!binding.branch?.tip || !binding.domain) return;
+    const tip = ezLocalToRoot(binding.branch.tip);
+    const outward = tip.clone();
+    outward.y = 0;
+    if (outward.lengthSq() > 1e-6) outward.normalize();
+    else outward.set(0, 0, 1);
+    const labelPosition = tip.clone()
+      .addScaledVector(outward, 0.22)
+      .add(new THREE.Vector3(0, 0.14, 0));
+
+    createTextLabel(binding.domain.label, labelPosition, {
+      scale: 0.13 + binding.domain.weight * 0.05,
+      fontSize: 26,
+      maxWidth: 340,
+      background: binding.domain.experienceType === "production"
+        ? "rgba(255, 220, 147, 0.72)"
+        : "rgba(255, 248, 216, 0.7)"
+    });
   });
 }
 
 function addEzPortfolioDecorations() {
-  addNaturalBarkLines();
-  addExperienceRings();
-  addProfileLabels();
+  addTrunkSignboard();
   addEzDomainLabels();
-  addEzProjectFruits();
+  addEzProjectPods();
 }
 
-function addEzDomainLabels() {
-  portfolioLayout.branchLayouts.forEach((branch) => {
-    const position = branch.endpoint.clone();
-    position.multiplyScalar(0.86);
-    position.y = Math.min(position.y + 0.18, 3.2);
+function addEzProjectPods() {
+  const bindings = ezTree?.userData?.adapter?.domainBindings || [];
+  const bindingByDomain = new Map(bindings.map((binding) => [binding.domain.id, binding]));
+  const fruitsByDomain = new Map();
 
-    createTextLabel(branch.label, position, {
-      scale: 0.15 + branch.weight * 0.026,
-      fontSize: 26,
-      maxWidth: 320,
-      background: branch.experienceType === "production" ? "rgba(255, 220, 147, 0.58)" : "rgba(255, 248, 216, 0.54)"
-    });
+  portfolioLayout.fruits.forEach((fruit) => {
+    if (!fruitsByDomain.has(fruit.branch)) fruitsByDomain.set(fruit.branch, []);
+    fruitsByDomain.get(fruit.branch).push(fruit);
   });
 
-  portfolioLayout.skillLayouts.forEach((cluster) => {
-    const position = cluster.center.clone();
-    position.multiplyScalar(0.82);
-    position.y = Math.min(position.y + 0.32, 3.42);
-
-    createTextLabel(cluster.label, position, {
-      scale: 0.12,
-      fontSize: 24,
-      maxWidth: 260,
-      background: "rgba(236, 255, 204, 0.48)"
-    });
-  });
-}
-
-function addEzProjectFruits() {
   portfolioLayout.fruits.forEach((fruit, index) => {
-    const materialByType = {
-      production: materials.fruitProduction,
-      openSource: materials.fruitOpenSource,
-      academic: materials.fruitAcademic,
-      prototype: materials.fruitPrototype,
-      personal: materials.fruitPersonal,
-      internship: materials.fruitAlt
+    const binding = bindingByDomain.get(fruit.branch);
+    const siblings = fruitsByDomain.get(fruit.branch) || [fruit];
+    const fruitIndex = Math.max(siblings.findIndex((entry) => entry.id === fruit.id), 0);
+    const domainAnchor = getFruitAnchorForDomain(binding, fruitIndex, siblings.length);
+
+    let hangPoint;
+    let localAttachment;
+    if (domainAnchor) {
+      hangPoint = ezLocalToRoot(domainAnchor.position);
+      localAttachment = ezLocalToRoot(domainAnchor.attachment);
+    } else {
+      hangPoint = getEzCanopyAnchor(index, fruit);
+      localAttachment = getEzBranchAttachment(hangPoint);
+    }
+
+    const fruitHeight = THREE.MathUtils.clamp(fruit.radius * 2.15, 0.18, 0.27);
+    const project = {
+      ...fruit,
+      height: fruitHeight,
+      position: hangPoint.clone().add(new THREE.Vector3(0, -fruitHeight * 0.28, 0))
     };
+    const podTop = project.position.clone().add(new THREE.Vector3(0, fruitHeight * 0.48, 0));
 
-    const position = fruit.position.clone();
-    position.multiplyScalar(0.82);
-    position.y = Math.min(Math.max(position.y + 0.08, 2.1), 3.05);
-    fruit.position.copy(position);
-    fruit.radius *= 0.92;
+    if (localAttachment.distanceTo(podTop) <= 0.45) {
+      const stemBend = localAttachment.clone().lerp(podTop, 0.5);
+      addBranch(
+        "projects",
+        [localAttachment, stemBend, podTop],
+        0.0045 + fruit.weight * 0.0018,
+        getEzBranchMaterial()
+      );
+    }
 
-    addFruitModel(fruit, materialByType[fruit.experienceType] || (index % 3 === 0 ? materials.fruitAlt : materials.fruit));
-    createTextLabel(fruit.label, fruit.position.clone().add(new THREE.Vector3(0, -fruit.radius - 0.12, 0.16)), {
+    const fruitMeshes = addProjectFruitModel(project, index);
+    const label = createTextLabel(project.label, project.position.clone().add(new THREE.Vector3(0, -fruitHeight * 0.64, 0.16)), {
       scale: 0.1 + fruit.weight * 0.018,
       fontSize: 22,
       maxWidth: 320,
-      background: fruit.experienceType === "openSource" ? "rgba(215, 247, 255, 0.5)" : "rgba(255, 248, 216, 0.48)"
+      background: fruit.experienceType === "openSource" ? "rgba(215, 247, 255, 0.68)" : "rgba(255, 248, 216, 0.68)",
+      visible: false
     });
+    fruitMeshes.forEach((mesh) => attachDiscoveryLabel(mesh, label));
   });
 }
 
 function trunkRadiusAt(y) {
   const normalized = (y + 0.945) / 2.65;
-  return 0.46 + (0.38 - 0.46) * THREE.MathUtils.clamp(normalized, 0, 1);
+  const radius = 0.46 + (0.38 - 0.46) * THREE.MathUtils.clamp(normalized, 0, 1);
+  return useEzTreeSkeleton ? radius * (ezTree?.userData.adapter?.scale || 0.13) : radius;
+}
+
+function getTrunkSurfaceRadius(y, center = new THREE.Vector3()) {
+  if (!useEzTreeSkeleton || !ezTreeAnchors?.bark?.length) {
+    return Math.max(trunkRadiusAt(y), 0.18);
+  }
+
+  const nearby = ezTreeAnchors.bark.filter((point) => Math.abs(point.y - y) < 0.16);
+  const samples = nearby.length > 0 ? nearby : ezTreeAnchors.bark;
+  const radii = samples.map((point) => Math.hypot(point.x - center.x, point.z - center.z));
+  const average = radii.reduce((sum, value) => sum + value, 0) / radii.length;
+  return Math.max(average, trunkRadiusAt(y), 0.16);
 }
 
 function makeBarkRing(job, options = {}) {
@@ -351,15 +816,16 @@ function makeBarkRing(job, options = {}) {
   const pointCount = 90;
   const baseRadius = trunkRadiusAt(job.y) + (options.offset || 0.026);
   const amplitude = options.amplitude || 0.018;
+  const center = options.center || new THREE.Vector3();
 
   for (let i = 0; i < pointCount; i += 1) {
     const angle = (i / pointCount) * Math.PI * 2;
     const wobble = Math.sin(angle * 3 + job.weight * 5.1) * amplitude
       + Math.sin(angle * 7 + job.angle) * amplitude * 0.42;
     points.push(new THREE.Vector3(
-      Math.cos(angle) * (baseRadius + wobble),
+      center.x + Math.cos(angle) * (baseRadius + wobble),
       job.y + Math.sin(angle * 2 + job.angle) * 0.018,
-      Math.sin(angle) * (baseRadius * 0.78 + wobble * 0.5)
+      center.z + Math.sin(angle) * (baseRadius * 0.78 + wobble * 0.5)
     ));
   }
 
@@ -375,15 +841,16 @@ function makeFrontGroove(job, options = {}) {
   const startAngle = Math.PI * 0.14;
   const endAngle = Math.PI * 0.86;
   const baseRadius = trunkRadiusAt(job.y) + (options.offset || 0.05);
+  const center = options.center || new THREE.Vector3();
 
   for (let i = 0; i < pointCount; i += 1) {
     const t = i / (pointCount - 1);
     const angle = THREE.MathUtils.lerp(startAngle, endAngle, t);
     const wobble = Math.sin(t * Math.PI * 5 + job.angle) * 0.014;
     points.push(new THREE.Vector3(
-      Math.cos(angle) * (baseRadius + wobble),
+      center.x + Math.cos(angle) * (baseRadius + wobble),
       job.y + Math.sin(t * Math.PI * 2 + job.weight) * 0.025,
-      Math.sin(angle) * (baseRadius * 0.8)
+      center.z + Math.sin(angle) * (baseRadius * 0.8)
     ));
   }
 
@@ -394,6 +861,8 @@ function makeFrontGroove(job, options = {}) {
 }
 
 function addNaturalBarkLines() {
+  if (useEzTreeSkeleton) return;
+
   for (let i = 0; i < 8; i += 1) {
     const y = -0.72 + i * 0.27;
     const jobLike = {
@@ -401,84 +870,119 @@ function addNaturalBarkLines() {
       angle: i * 0.6,
       weight: 0.28 + i * 0.04
     };
-    makeBarkRing(jobLike, {
-      thickness: 0.005,
-      amplitude: 0.01,
-      offset: 0.014,
-      material: i % 2 === 0 ? materials.barkDark : materials.barkHighlight
-    });
+    const center = getEzTrunkCenter(y);
+    if (!useEzTreeSkeleton) {
+      makeBarkRing(jobLike, {
+        thickness: 0.005,
+        amplitude: 0.01,
+        offset: 0.014,
+        material: i % 2 === 0 ? materials.barkDark : materials.barkHighlight,
+        center
+      });
+    }
 
     if (i % 2 === 0) {
       makeFrontGroove(jobLike, {
         thickness: 0.006,
         offset: 0.038,
-        material: materials.barkDark
+        material: materials.barkDark,
+        center
       });
     }
   }
 }
 
 function addExperienceRings() {
+  if (useEzTreeSkeleton) return;
+
   resumeTreeData.trunk.jobs.forEach((job) => {
     const ringThickness = 0.01 + job.weight * 0.017;
-    makeBarkRing(job, {
-      thickness: ringThickness,
-      amplitude: 0.016 + job.weight * 0.012,
-      offset: 0.035,
-      material: job.id === "ltimindtree" ? materials.barkGroove : materials.barkDark
-    });
-    makeFrontGroove(job, {
-      thickness: 0.016 + job.weight * 0.02,
-      offset: 0.058,
-      material: job.id === "ltimindtree" ? materials.barkGroove : materials.barkDark
-    });
+    const center = getEzTrunkCenter(job.y);
+    if (!useEzTreeSkeleton) {
+      makeBarkRing(job, {
+        thickness: ringThickness,
+        amplitude: 0.016 + job.weight * 0.012,
+        offset: 0.035,
+        material: job.id === "ltimindtree" ? materials.barkGroove : materials.barkDark,
+        center
+      });
+      makeFrontGroove(job, {
+        thickness: 0.016 + job.weight * 0.02,
+        offset: 0.058,
+        material: job.id === "ltimindtree" ? materials.barkGroove : materials.barkDark,
+        center
+      });
 
-    makeFrontGroove(
-      { ...job, y: job.y - 0.055, angle: job.angle + 0.9 },
-      {
-        thickness: 0.005 + job.weight * 0.006,
-        offset: 0.062,
-        material: materials.barkHighlight
-      }
-    );
+      makeFrontGroove(
+        { ...job, y: job.y - 0.055, angle: job.angle + 0.9 },
+        {
+          thickness: 0.005 + job.weight * 0.006,
+          offset: 0.062,
+          material: materials.barkHighlight,
+          center: getEzTrunkCenter(job.y - 0.055)
+        }
+      );
+    }
 
     const frontRadius = trunkRadiusAt(job.y) + 0.12;
-    const labelPosition = new THREE.Vector3(0, job.y + 0.08, frontRadius * 0.82);
-    createTextLabel(`${job.period} ${job.label}`, labelPosition, {
+    const labelPosition = new THREE.Vector3(center.x, job.y + 0.08, center.z + frontRadius * 0.82);
+    const label = createTextLabel(`${job.period} ${job.label}`, labelPosition, {
       scale: 0.12 + job.weight * 0.035,
       fontSize: 24,
       maxWidth: job.id === "ltimindtree" ? 430 : 340,
       color: "#3c2415",
-      background: "rgba(255, 232, 177, 0.18)",
-      border: "rgba(92, 55, 30, 0.04)"
+      background: "rgba(255, 232, 177, 0.72)",
+      border: "rgba(92, 55, 30, 0.12)",
+      visible: false
     });
 
-    addNode(
+    const ringNode = addNode(
       "experience",
-      new THREE.Vector3(Math.cos(job.angle) * frontRadius, job.y + 0.02, Math.sin(job.angle) * frontRadius * 0.78),
+      new THREE.Vector3(
+        center.x,
+        job.y + 0.02,
+        center.z + frontRadius * 0.78
+      ),
       0.035 + job.weight * 0.055,
       job.id === "ltimindtree" ? materials.barkHighlight : materials.barkDark
     );
+    attachDiscoveryLabel(ringNode, label);
   });
 
   const mainJob = resumeTreeData.trunk.jobs.find((job) => job.id === "ltimindtree") || resumeTreeData.trunk.jobs.at(-1);
   resumeTreeData.trunk.accomplishmentMarks.forEach((mark, index) => {
-    const angle = index * 1.18 + seededRange(resumeTreeData.seed, `${mark.label}:markAngle`, -0.18, 0.18);
     const y = mainJob.y - 0.18 + index * 0.08;
     const radius = trunkRadiusAt(y) + 0.075;
+    const center = getEzTrunkCenter(y);
     addNode(
       "profile",
-      new THREE.Vector3(Math.cos(angle) * radius, y, Math.sin(angle) * radius * 0.78),
+      new THREE.Vector3(
+        center.x,
+        y,
+        center.z + radius * 0.78
+      ),
       0.035 + mark.weight * 0.035,
       materials.marker
     );
   });
 }
 
-function addBranch(type, points, radius) {
-  const branch = tubeFromPoints(points, radius, materials.bark, 42);
+let ezBranchStemMaterial = null;
+
+function getEzBranchMaterial() {
+  if (ezBranchStemMaterial) return ezBranchStemMaterial;
+  const source = ezTree?.branchesMesh?.material;
+  if (!source) return materials.bark;
+  ezBranchStemMaterial = source.clone();
+  ezBranchStemMaterial.side = THREE.DoubleSide;
+  return ezBranchStemMaterial;
+}
+
+function addBranch(type, points, radius, material = materials.bark) {
+  const branch = tubeFromPoints(points, radius, material, 42);
   branch.userData.type = type;
   root.add(branch);
+  return branch;
 }
 
 function addTwigFork(branch, branchType) {
@@ -646,7 +1150,7 @@ function addFruits() {
     if (branch) {
       const stemStart = branch.endpoint.clone().lerp(fruit.position, 0.6).add(new THREE.Vector3(0, 0.08, 0));
       const stemEnd = fruit.position.clone().add(new THREE.Vector3(0, fruit.radius * 0.95, 0));
-      addBranch("projects", [stemStart, stemEnd], Math.max(0.01, fruit.radius * 0.1));
+      addBranch("projects", [stemStart, stemEnd], Math.max(0.01, fruit.radius * 0.1), getEzBranchMaterial());
     }
     addFruitModel(fruit, materialByType[fruit.experienceType] || (index % 3 === 0 ? materials.fruitAlt : materials.fruit));
     createTextLabel(fruit.label, fruit.position.clone().add(new THREE.Vector3(0, -fruit.radius - 0.12, 0.16)), {
@@ -684,6 +1188,32 @@ function addFruitModel(fruit, material) {
   return group;
 }
 
+function addProjectFruitModel(project, index) {
+  const group = new THREE.Group();
+  const fruit = projectFruitPrototype.clone(true);
+  const bounds = new THREE.Box3().setFromObject(fruit);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const scale = project.height / Math.max(size.y, 0.001);
+  fruit.position.copy(center).multiplyScalar(-scale);
+  fruit.scale.setScalar(scale);
+  fruit.rotation.y = index * 1.73;
+  group.add(fruit);
+
+  group.position.copy(project.position);
+  group.userData.type = "projects";
+  root.add(group);
+  const meshes = [];
+  fruit.traverse((child) => {
+    if (!child.isMesh) return;
+    child.userData.type = "projects";
+    child.userData.baseScale = child.scale.clone();
+    selectable.push(child);
+    meshes.push(child);
+  });
+  return meshes;
+}
+
 function addContactOrbits() {
   const orbit = new THREE.Mesh(
     new THREE.TorusGeometry(2.15, 0.008, 8, 128),
@@ -703,46 +1233,94 @@ function addContactOrbits() {
 // Interaction and animation
 function focusNode(type) {
   const focus = focusTargets[type] || focusTargets.profile;
-  desiredCamera = focus.position.clone();
-  desiredTarget = focus.target.clone();
-  isCameraAnimating = true;
+  desiredPlayerPosition.set(focus.position.x, 0, focus.position.z);
+  keepClearOfTrunk(desiredPlayerPosition);
+  clampToRadius(desiredPlayerPosition, YARD_BOUNDS.softCameraRadius);
+  desiredLookAt.copy(focus.lookAt || focus.target || focus.position);
+  isPlayerNavigating = true;
+}
+
+function selectNode(node, source = "pointer") {
+  selectedObject = node;
+  revealDiscoveryLabel(selectedObject);
+  if (shouldFocusCameraAfterSelection(source)) {
+    focusNode(selectedObject.userData.type);
+  }
+}
+
+function setWalkHintVisible(visible) {
+  if (!walkHint) return;
+  walkHint.dataset.visible = visible ? "true" : "false";
 }
 
 function bindUi() {
-  controls.addEventListener("start", () => {
-    isCameraAnimating = false;
+  setWalkHintVisible(true);
+
+  controls.addEventListener("lock", () => {
+    setWalkHintVisible(false);
+    isPlayerNavigating = false;
+  });
+
+  controls.addEventListener("unlock", () => {
+    setWalkHintVisible(true);
+    Object.keys(moveKeys).forEach((key) => {
+      moveKeys[key] = false;
+    });
+  });
+
+  canvas.addEventListener("click", () => {
+    if (!controls.isLocked) {
+      controls.lock();
+    }
   });
 
   window.addEventListener("keydown", (event) => {
+    const key = event.code;
+    if (key === "KeyW" || key === "ArrowUp") moveKeys.forward = true;
+    if (key === "KeyS" || key === "ArrowDown") moveKeys.backward = true;
+    if (key === "KeyA" || key === "ArrowLeft") moveKeys.left = true;
+    if (key === "KeyD" || key === "ArrowRight") moveKeys.right = true;
+    if (key === "ShiftLeft" || key === "ShiftRight") moveKeys.sprint = true;
+
     const keyMap = {
-      "1": "education",
-      "2": "profile",
-      "3": "experience",
-      "4": "skills",
-      "5": "projects",
-      "6": "contact"
+      Digit1: "education",
+      Digit2: "profile",
+      Digit3: "experience",
+      Digit4: "skills",
+      Digit5: "projects",
+      Digit6: "contact"
     };
-    if (keyMap[event.key]) {
-      focusNode(keyMap[event.key]);
+    if (keyMap[key]) {
+      focusNode(keyMap[key]);
     }
+
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(key)) {
+      event.preventDefault();
+    }
+  });
+
+  window.addEventListener("keyup", (event) => {
+    const key = event.code;
+    if (key === "KeyW" || key === "ArrowUp") moveKeys.forward = false;
+    if (key === "KeyS" || key === "ArrowDown") moveKeys.backward = false;
+    if (key === "KeyA" || key === "ArrowLeft") moveKeys.left = false;
+    if (key === "KeyD" || key === "ArrowRight") moveKeys.right = false;
+    if (key === "ShiftLeft" || key === "ShiftRight") moveKeys.sprint = false;
   });
 }
 
 function bindPicking() {
   const raycaster = new THREE.Raycaster();
-  const pointer = new THREE.Vector2();
+  const pointer = new THREE.Vector2(0, 0);
 
   window.addEventListener("pointerdown", (event) => {
-    const rect = renderer.domElement.getBoundingClientRect();
-    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera(pointer, camera);
+    if (!controls.isLocked) return;
+    if (event.button !== 0) return;
 
+    raycaster.setFromCamera(pointer, camera);
     const hit = raycaster.intersectObjects(selectable, false)[0];
     if (!hit) return;
-
-    selectedObject = hit.object;
-    focusNode(selectedObject.userData.type);
+    selectNode(hit.object);
   });
 }
 
@@ -760,38 +1338,52 @@ function animate(time = 0) {
   }
   frameCount += 1;
 
+  const deltaSeconds = Math.min(0.05, (time - lastFrameTime) * 0.001 || 0.016);
+  lastFrameTime = time;
   const seconds = time * 0.001;
+  const wind = getGlobalWindState(seconds);
+  if (seconds - lastTimePaletteRefresh >= 60) {
+    applyTimeOfDay();
+    lastTimePaletteRefresh = seconds;
+  }
   if (environmentController) {
-    environmentController.update(seconds);
+    environmentController.update(seconds, wind);
   }
-  if (isCameraAnimating) {
-    camera.position.lerp(desiredCamera, 0.045);
-    controls.target.lerp(desiredTarget, 0.05);
-
-    if (camera.position.distanceTo(desiredCamera) < 0.03 && controls.target.distanceTo(desiredTarget) < 0.03) {
-      camera.position.copy(desiredCamera);
-      controls.target.copy(desiredTarget);
-      isCameraAnimating = false;
-    }
-  }
+  updateTreeWind(seconds, wind);
+  updatePlayerMovement(deltaSeconds);
 
   selectable.forEach((node, index) => {
-    const pulse = 1 + Math.sin(seconds * 2.6 + index) * 0.055;
+    if (node.userData.pulse === false) return;
+    const pulse = node.userData.type === "projects" ? 1 : 1 + Math.sin(seconds * 2.6 + index) * 0.055;
     const selectedBoost = node === selectedObject ? 1.24 : 1;
     node.scale.copy(node.userData.baseScale || new THREE.Vector3(1, 1, 1)).multiplyScalar(pulse * selectedBoost);
   });
 
-  controls.update();
+  enforceYardBounds();
+  updateBoundaryFog();
   renderer.render(scene, camera);
 
-window.__portfolioTreeDebug = {
+  window.__portfolioTreeDebug = {
     frameCount,
     sceneChildren: scene.children.length,
     rootChildren: root.children.length,
     selectableNodes: selectable.length,
     triangles: renderer.info.render.triangles,
     generator: useEzTreeSkeleton ? "ez-tree" : "portfolio-layout",
-    ezTreeOptions
+    wind,
+    ezTreeOptions,
+    player: {
+      locked: controls.isLocked,
+      position: camera.position.toArray()
+    },
+    signboard: (() => {
+      const board = root.children.find((child) => child.userData?.signboard);
+      if (!board) return null;
+      return {
+        position: board.position.toArray(),
+        placement: board.userData.placementDebug || null
+      };
+    })()
   };
 }
 
@@ -804,6 +1396,7 @@ addCloud(new THREE.Vector3(0.7, 6.4, -4.2), 0.58);
 addRoots();
 if (useEzTreeSkeleton) {
   await addEzTreeSkeleton();
+  await loadProjectFruitModel();
   addEzPortfolioDecorations();
 } else {
   addTrunk();
@@ -813,6 +1406,9 @@ if (useEzTreeSkeleton) {
 }
 bindUi();
 bindPicking();
+setPlayerOnGround(0, 6.4);
+camera.lookAt(0, 0.55, 0);
+camera.rotation.order = "YXZ";
 
 window.addEventListener("resize", handleResize);
 animate();

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Soumojit Dalui's Three.js portfolio tree scene." />
+    <title>Soumojit Dalui | 3D Portfolio Tree</title>
+    <link rel="preconnect" href="https://unpkg.com" />
+    <link rel="stylesheet" href="assets/css/tree.css?v=first-person" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.167.1/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.167.1/examples/jsm/",
+          "@dgreenheck/ez-tree": "https://unpkg.com/@dgreenheck/ez-tree@1.1.0/build/ez-tree.es.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="tree-scene" aria-label="3D portfolio tree"></canvas>
+    <div id="walk-hint" data-visible="true">
+      <p>Click to look around</p>
+      <p>WASD walk · Shift sprint · Esc release · 1–6 focus</p>
+    </div>
+    <script type="module" src="assets/js/tree.js?v=resume-crown"></script>
+  </body>
+</html>

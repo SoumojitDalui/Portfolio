@@ -69,6 +69,8 @@ export function createTextLabel(root, labels, text, position, options = {}) {
   sprite.position.copy(position);
   sprite.scale.set((canvas.width / canvas.height) * scale, scale, 1);
   sprite.renderOrder = 20;
+  sprite.visible = options.visible ?? true;
+  sprite.userData.alwaysVisible = options.visible ?? true;
 
   root.add(sprite);
   labels.push(sprite);

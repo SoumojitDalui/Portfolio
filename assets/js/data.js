@@ -1,12 +1,12 @@
 import * as THREE from "three";
 
 export const focusTargets = {
-  profile: { position: new THREE.Vector3(0, 1.55, 6.8), target: new THREE.Vector3(0, 1.05, 0) },
-  education: { position: new THREE.Vector3(0, -1.4, 7.2), target: new THREE.Vector3(0, -1.2, 0) },
-  experience: { position: new THREE.Vector3(3.8, 3.0, 6.2), target: new THREE.Vector3(0.75, 2.7, 0) },
-  skills: { position: new THREE.Vector3(-3.4, 4.7, 7.4), target: new THREE.Vector3(0, 4.15, 0) },
-  projects: { position: new THREE.Vector3(2.9, 4.2, 5.8), target: new THREE.Vector3(0.8, 4.05, 0) },
-  contact: { position: new THREE.Vector3(0, 5.4, 8.5), target: new THREE.Vector3(0, 4.3, 0) }
+  profile: { position: new THREE.Vector3(0.15, 0, 4.4), lookAt: new THREE.Vector3(0, 0.35, 0) },
+  education: { position: new THREE.Vector3(0.1, 0, 3.2), lookAt: new THREE.Vector3(0, -0.75, 0.4) },
+  experience: { position: new THREE.Vector3(3.4, 0, 3.8), lookAt: new THREE.Vector3(0.4, 1.4, 0) },
+  skills: { position: new THREE.Vector3(-3.2, 0, 4.0), lookAt: new THREE.Vector3(0, 2.4, 0) },
+  projects: { position: new THREE.Vector3(2.6, 0, 4.6), lookAt: new THREE.Vector3(0.5, 2.1, 0) },
+  contact: { position: new THREE.Vector3(0, 0, 5.8), lookAt: new THREE.Vector3(0, 3.2, 0) }
 };
 
 export const resumeTreeData = {
@@ -16,8 +16,13 @@ export const resumeTreeData = {
     openSource: { heightBias: 0.18, radiusBoost: 0.02, outwardBoost: 0.12, zBias: -0.1 },
     academic: { heightBias: 0.26, radiusBoost: -0.004, outwardBoost: 0.02, zBias: 0.12 },
     personal: { heightBias: 0.08, radiusBoost: 0.004, outwardBoost: 0.04, zBias: 0.24 },
-    prototype: { heightBias: 0.14, radiusBoost: -0.012, outwardBoost: -0.04, zBias: -0.24 },
-    internship: { heightBias: -0.28, radiusBoost: -0.018, outwardBoost: -0.14, zBias: 0.18 }
+    prototype: { heightBias: 0.14, radiusBoost: -0.012, outwardBoost: -0.04, zBias: -0.24 }
+  },
+  profile: {
+    name: "Soumojit Dalui",
+    profession: "Software Engineer",
+    experienceLabel: "4 years experience",
+    latestCompany: "LTIMindtree"
   },
   trunk: {
     years: 4,
@@ -44,11 +49,11 @@ export const resumeTreeData = {
   branches: [
     { id: "production", label: "Production Engineering", experienceType: "production", weight: 0.96, skills: ["frontend", "backend", "data", "cloud"] },
     { id: "backend", label: "Backend & APIs", experienceType: "production", weight: 0.84, skills: ["backend", "data", "cloud"] },
+    { id: "distributed", label: "Distributed Systems", experienceType: "openSource", weight: 0.78, skills: ["backend", "data", "cloud", "languages"] },
     { id: "data", label: "Data Systems", experienceType: "openSource", weight: 0.82, skills: ["data", "languages"] },
     { id: "ai", label: "AI / Retrieval", experienceType: "academic", weight: 0.72, skills: ["ai", "data", "languages"] },
     { id: "web", label: "Web Applications", experienceType: "personal", weight: 0.68, skills: ["frontend", "backend"] },
-    { id: "xr", label: "Game / XR", experienceType: "prototype", weight: 0.46, skills: ["ai", "languages"] },
-    { id: "internships", label: "Internships", experienceType: "internship", weight: 0.38, skills: ["languages", "data"] }
+    { id: "xr", label: "Game / XR", experienceType: "prototype", weight: 0.46, skills: ["ai", "languages"] }
   ],
   skillClusters: [
     { id: "languages", label: "Languages", weight: 0.92, skills: ["Python", "TypeScript", "C#", "C++", "Rust", "SQL"] },
@@ -64,7 +69,13 @@ export const resumeTreeData = {
     { id: "semantic-books", label: "Semantic Book Explorer", branch: "ai", experienceType: "academic", weight: 0.7 },
     { id: "sqmc", label: "SQMC Website", branch: "web", experienceType: "personal", weight: 0.72 },
     { id: "echoes", label: "Echoes of Two Realms", branch: "xr", experienceType: "prototype", weight: 0.62 },
+    { id: "vr-campus", label: "VR Campus Interaction", branch: "xr", experienceType: "prototype", weight: 0.76 },
     { id: "transfer-songs", label: "Transfer Songs", branch: "backend", experienceType: "personal", weight: 0.64 },
+    { id: "talk-to-mute", label: "Talk To Mute", branch: "backend", experienceType: "personal", weight: 0.52 },
+    { id: "invoice-system", label: "Full-Stack Invoice System", branch: "web", experienceType: "personal", weight: 0.68 },
+    { id: "movie-explorer", label: "Movie Explorer", branch: "web", experienceType: "personal", weight: 0.48 },
+    { id: "raft", label: "Raft Consensus Implementation", branch: "distributed", experienceType: "openSource", weight: 0.7 },
+    { id: "consensus-ledger", label: "Consensus Ledger", branch: "distributed", experienceType: "openSource", weight: 0.78 },
     { id: "nanogpt", label: "Domain Adaptation NanoGPT", branch: "ai", experienceType: "academic", weight: 0.56 }
   ]
 };

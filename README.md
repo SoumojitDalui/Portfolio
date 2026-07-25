@@ -1,6 +1,26 @@
-# 3D Portfolio Tree
+# 3D Portfolio Fridge
 
-Soumojit Dalui's portfolio rebuilt as a static Three.js experience.
+Soumojit Dalui's resume and GitHub projects rebuilt as an interactive Three.js refrigerator.
+
+The default route is the fridge experience:
+
+- Exterior post-it notes: profile, blog, contact, and game leaderboard
+- Main shelves: project domains represented by cuisine-coded processed food
+- Vegetable drawer: technical experience and the Equal Cuts mini-game
+- Fruit drawer: education/certifications and the Fruit Slice mini-game
+- Door shelves: hobby gacha and the reusable portfolio repository link
+
+The original portfolio tree remains available at `tree.html` and all of its assets are preserved.
+
+## Fridge Data Model
+
+The fridge content is defined in `assets/js/fridgeData.js`. Scene construction and interaction live in `assets/js/fridge.js`; both mini-games live in `assets/js/miniGames.js`.
+
+```text
+resume + GitHub -> fridgePortfolio -> notes / drawers / cuisine shelves / mini-games
+```
+
+## Original Tree
 
 The tree is generated from structured resume data:
 
@@ -48,10 +68,10 @@ The app now has an `ez-tree` adapter in `assets/js/ezTreeAdapter.js`.
 resumeTreeData -> resumeToEzTreeOptions() -> @dgreenheck/ez-tree TreeOptions
 ```
 
-The default route still uses the current portfolio-specific renderer. To inspect the generated `ez-tree` skeleton, open:
+The default route uses the generated `ez-tree` skeleton. To inspect the legacy portfolio-specific renderer, open:
 
 ```text
-http://localhost:8000/?skeleton=ez
+http://localhost:8000/?skeleton=legacy
 ```
 
 This keeps resume semantics and portfolio decoration separate from the external procedural tree generator.
